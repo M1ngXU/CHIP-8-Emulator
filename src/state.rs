@@ -87,7 +87,7 @@ impl TwoBytes {
 		}
 	}
 
-	pub fn as_usize(self) -> usize {
+	pub fn as_usize(&self) -> usize {
 		self.data as usize
 	}
 
@@ -96,23 +96,23 @@ impl TwoBytes {
 	}
 
 	pub fn shift_left(&self, amount: u8) -> Self {
-		let mut mask = 0xFF;
-		for b in 0..amount {
-			mask = mask & !(1 << (7 - b));
+		let mut mask = 0;
+		for b in 0..=(15 - amount) {
+			mask |= 1 << b;
 		}
 		Self::from((self.data & mask) << amount)
 	}
 
 	pub fn shift_right(&self, amount: u8) -> Self {
-		let mut mask = 0xFF;
-		for b in 0..amount {
-			mask = mask & !(1 << b);
+		let mut mask = 0x00;
+		for b in amount..=15 {
+			mask |= 1 << b;
 		}
 		Self::from((self.data & mask) >> amount)
 	}
 
 	pub fn get_bit(&self, bit: u8) -> bool {
-		self.mask_bits(&Byte::from(1).shift_left(bit)).shift_right(bit).data == 1
+		self.mask_bits(&TwoBytes::from(1).shift_left(bit)).shift_right(bit).data == 1
 	}
 }
 
@@ -308,17 +308,17 @@ fn byte() {
 #[test]
 fn two_bytes() {
 	let cut = TwoBytes::from(0b0000_1110_0000_0000);
-	assert_eq!(cut.get_bit(8), true);
+	assert_eq!(cut.get_bit(8), false);
 	assert_eq!(cut.get_bit(9), true);
 	assert_eq!(cut.get_bit(10), true);
-	assert_eq!(cut.get_bit(11), false);
+	assert_eq!(cut.get_bit(11), true);
 	assert_eq!(cut.get_bit(12), false);
 	assert_eq!(cut.get_bit(13), false);
 	assert_eq!(cut.get_bit(14), false);
 	assert_eq!(cut.get_bit(15), false);
 
-	assert_eq!(cut.as_usize(), 20);
+	assert_eq!(cut.as_usize(), 3584);
 
-	assert_eq!(cut.shift_left(4), Byte::from(0b1110_0000_0000_0000));
-	assert_eq!(cut.shift_right(4), Byte::from(0b0000_0000_1110_0000));
+	assert_eq!(cut.shift_left(4), TwoBytes::from(0b1110_0000_0000_0000));
+	assert_eq!(cut.shift_right(4), TwoBytes::from(0b0000_0000_1110_0000));
 }
