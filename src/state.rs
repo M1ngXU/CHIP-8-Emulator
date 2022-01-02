@@ -57,6 +57,10 @@ impl Byte {
 	pub fn get_bit(&self, bit: u8) -> bool {
 		self.mask_bits(&Byte::from(1).shift_left(bit)).shift_right(bit).data == 1
 	}
+
+	pub fn add_byte(&self, byte: Byte) -> Byte {
+		Byte::from(((self.data as u16 + 0xFF + byte.data as u16) & 0xFF) as u8)
+	}
 }
 
 
@@ -119,12 +123,12 @@ impl TwoBytes {
 		self.mask_bits(&TwoBytes::from(1).shift_left(bit)).shift_right(bit).data == 1
 	}
 
-	pub fn add(&mut self, amount: u16) {
+	pub fn increase(&mut self, amount: u16) {
 		self.data += amount;
 	}
 
-	pub fn add_byte(&mut self, byte: Byte) {
-		self.data += byte.data;
+	pub fn increase_with_byte(&mut self, byte: Byte) {
+		self.data += byte.data as u16;
 	}
 }
 
@@ -303,41 +307,107 @@ impl State {
 		let l2_const = current.mask_bits(&TwoBytes::from(0x00FF)).as_byte();
 		let l1_const = current.mask_bits(&TwoBytes::from(0x000F)).as_byte();
 		match current.shift_right(12).as_usize() {
-			0x0 | 0x1 | 0x2 | 0xB => {
-				match current.shift_right(12).as_usize() {
-					0x0 => match l3_const.data {
-							0x00E0 => {
-								self.screen.clear();
-								self.pc.add(2);
-							}, 0x00EE => {
-								self.pc = self.stack.pop_back().unwrap();
-							}, _ => {
-								todo!("not necessary?");
-							}
-					}, 0x1 => {
-						if self.pc == l3_const {
-							return true;
-						}
-						self.pc = l3_const;
-					}, 0x2 => {
-						self.stack.push_back(self.pc);
-						self.pc = l3_const;
-					}, 0xB => {
-						self.pc = l3_const;
-						self.pc.add_byte(self.data_registers.get_0());
-					}, _ => unimplemented!()
+			0x0 | 0x1 | 0x2 | 0xB => {},
+			_ => self.pc.increase(2)
+		};
+		match current.shift_right(12).as_usize() {
+			0x0 => match l3_const.data {
+				0x00E0 => {
+					self.screen.clear();
+					self.pc.increase(2);
+				}, 0x00EE => {
+					self.pc = self.stack.pop_back().unwrap();
+				}, _ => {
+					todo!("not necessary?");
 				}
-			}, _ => {
-				self.pc.add(2);
-				match current.shift_right(12).as_usize() {
-					0x3000 => if x == l2_const {
-						self.pc.add(2)
-					}, 0x4000 => if x != l2_const {
-						self.pc.add(2);
-					}, 0x5000 => if x == y {
-						self.pc.add(2);
+			}, 0x1 => {
+				if self.pc == l3_const {
+					return true;
+				}
+				self.pc = l3_const;
+			}, 0x2 => {
+				self.stack.push_back(self.pc);
+				self.pc = l3_const;
+			}, 0xB => {
+				self.pc = l3_const;
+				self.pc.increase_with_byte(self.data_registers.get_0());
+			}, 0x3000 => if x == l2_const {
+				self.pc.increase(2)
+			}, 0x4000 => if x != l2_const {
+				self.pc.increase(2);
+			}, 0x5000 => if x == y {
+				self.pc.increase(2);
+			}, 0x6000 => self.data_registers.set_x(current, l2_const),
+			0x7000 => self.data_registers.set_x(current, x.add_byte(y)),
+			0x8000 => match l1_const.data {
+				0x00 => self.data_registers.set_x(current, y),
+				0x01 => self.data_registers.set_x(current, Byte::from(x.data | y.data)),
+				0x02 => self.data_registers.set_x(current, Byte::from(x.data & y.data)),
+				0x03 => self.data_registers.set_x(current, Byte::from(x.data ^ y.data)),
+				0x04 => {
+					self.data_registers.set_f(Byte::new());
+					if x.data > (0xFF - y.data) {
+						self.data_registers.set_f(Byte::from(1));
+					}
+					self.data_registers.set_x(current, x.add_byte(y));
+				}, 0x05 => {
+					self.data_registers.set_f(Byte::new());
+					if x.data < y.data {
+						self.data_registers.set_f(Byte::from(1));
+						self.data_registers.set_x(current, Byte::from((x.data as u16 + 0xFF - y.data as u16) as u8));
+					} else {
+						self.data_registers.set_x(current, Byte::from(x.data - y.data));
+					}
+				}, 0x06 => {
+					self.data_registers.set_f(Byte::from(((current.data & 0b1000_0000) >> 7) as u8));
+					self.data_registers.set_x(current, Byte::from(((current.data & 0b0111_1111) << 1) as u8));
+				}, 0x07 => {
+					self.data_registers.set_f(Byte::new());
+					if y.data < x.data {
+						self.data_registers.set_f(Byte::from(1));
+						self.data_registers.set_x(current, Byte::from((y.data as u16 + 0xFF - x.data as u16) as u8));
+					} else {
+						self.data_registers.set_x(current, Byte::from(y.data - x.data));
+					}
+				}, 0x08 => {
+					self.data_registers.set_f(Byte::from((current.data & 0b0000_0001) as u8));
+					self.data_registers.set_x(current, Byte::from(((current.data & 0b1111_1110) >> 1) as u8));
+				},
+				_ => panic!("Unknown Variable Operation {}.", current)
+			}, 0x9000 => if x.data != y.data {
+				self.pc.increase(2);
+			}, 0xA000 => self.adress_register = l3_const,
+			0xB000 => {
+				pc = current_opcode & 0x0FFF + v[0] as u16;
+			}, 0xC000 => {
+				let rand = start.elapsed().unwrap().as_nanos() % (current_opcode & 0x00FF) as u128;
+				v[((current_opcode & 0x0F00) >> 8) as usize] = rand as u8;
+				pc += 2;
+			}, 0xD000 => {
+				let x = v[((current_opcode & 0x0F00) >> 8) as usize] as usize;
+				let y = v[((current_opcode & 0x00F0) >> 4) as usize] as usize;
+				v[0xF] = 0x00;
+				for h in 0..(current_opcode & 0x000F) {
+					for i in 0..8 {
+						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
+						if new_bit {
+							if screen.get(x + i, y + h as usize) {
+								v[0xF] = 0x1;
+							}
+							screen.swap(x + i, y + h as usize);
+						}
 					}
 				}
+				pc += 2;
+			}, 0xE000 => {
+				if stored_key == match (current_opcode & 0x00FF) as u8 {
+					0x9E => true,
+					0xA1 => false,
+					_ => panic!("Unknown key opcode {:x}.", current_opcode)
+				} {
+					pc += 2;
+				}
+				pc += 2;
 			}
 		}
 		false
