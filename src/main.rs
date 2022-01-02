@@ -2,6 +2,7 @@ use std::{ thread, time::Duration, fs };
 use std::time::SystemTime;
 use std::collections::LinkedList;
 mod state;
+mod screen;
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
 	0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -27,10 +28,10 @@ fn main() {
 	let mut memory = [ 0u8; 4096 ];
 	let mut stack = LinkedList::new();
 	let mut v = [ 0u8; 16 ];
-	let mut screen = [ [ false; 64 ]; 32 ];
+	let mut screen = screen::Screen::new(64, 32);
 
 	FONT.iter().enumerate().for_each(| (i, &b) | memory[i] = b);
-	let programm = fs::read("./br8kout.ch8").expect("Failed to read programm.");
+	let programm = fs::read("./IBM.ch8").expect("Failed to read programm.");
 	programm.iter().enumerate().for_each(| (i, &b) | memory[i + 0x200] = b);
 	//println!("{:x?}", memory);
 	//panic!();
@@ -63,7 +64,7 @@ fn main() {
 				match current_opcode & 0x0FFF {
 					0x00E0 => {
 						pc += 2;
-						screen = [ [ false; 64 ]; 32 ];
+						screen.clear();
 					}, 0x00EE => {
 						pc = stack.pop_back().unwrap();
 					}, _ => {
@@ -171,14 +172,13 @@ fn main() {
 						}
 						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
 						if new_bit {
-							if screen[y + h as usize][x + i] {
-								v[0xF] = 0x01;
+							if screen.get(x + i, y + h as usize) {
+								v[0xF] = 0x1;
 							}
-							screen[y + h as usize][x + i] = !screen[y + h as usize][x + i];
+							screen.swap(x + i, y + h as usize);
 						}
 					}
 				}
-				//let _ = fs::write("output", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
 				pc += 2;
 			}, 0xE000 => {
 				if stored_key == match (current_opcode & 0x00FF) as u8 {
@@ -225,7 +225,7 @@ fn main() {
 		
 		if last_frame.elapsed().unwrap().as_millis() as f32 > 1000.0 / 60.0 {
 			last_frame = SystemTime::now();
-			println!("\x1B[1;1H{}", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { " " }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
+			screen.update();
 			if delay_timer > 0 {
 				delay_timer -= 1;
 			}
