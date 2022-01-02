@@ -1,7 +1,7 @@
 use std::{ thread, time::Duration, fs };
 use std::time::SystemTime;
 use std::collections::LinkedList;
-
+mod state;
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
 	0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -30,11 +30,11 @@ fn main() {
 	let mut screen = [ [ false; 64 ]; 32 ];
 
 	FONT.iter().enumerate().for_each(| (i, &b) | memory[i] = b);
-	let programm = fs::read("./Pong.ch8").expect("Failed to read programm.");
+	let programm = fs::read("./br8kout.ch8").expect("Failed to read programm.");
 	programm.iter().enumerate().for_each(| (i, &b) | memory[i + 0x200] = b);
 	//println!("{:x?}", memory);
 	//panic!();
-	println!("\x1B[2J\x1b[?25l");
+	//println!("\x1B[2J\x1b[?25l");
 	
 	let mut delay_timer = 0;
 	let mut sound_timer = 0;
@@ -49,14 +49,13 @@ fn main() {
 
 	while pc < 0x200 + programm.len() as u16 {
 		if let Some(register) = awaiting_key {
-			v[register] = 0x0F;
+			v[register] = 0x02;
 			stored_key = true;
 			awaiting_key = None;
 			continue;
 		}
 		last_opcode = SystemTime::now();
-
-		let start_of_frame = SystemTime::now();
+		
 		let current_opcode = (memory[pc as usize] as u16) << 8 | memory[pc as usize + 1] as u16;
 		//println!("0x{:x}", current_opcode);
 		match current_opcode & 0xF000 {
@@ -65,11 +64,9 @@ fn main() {
 					0x00E0 => {
 						pc += 2;
 						screen = [ [ false; 64 ]; 32 ];
-						print!("\x1B[2J\x1B[1;1H");
 					}, 0x00EE => {
 						pc = stack.pop_back().unwrap();
 					}, _ => {
-						//pc += 2;
 						todo!("not necessary?");
 					}
 				}
@@ -86,6 +83,7 @@ fn main() {
 				if v[((current_opcode & 0x0F00) >> 8) as usize] == (current_opcode & 0x00FF) as u8 {
 					pc += 2;
 				}
+				//println!("{:x} {:?} {}", current_opcode, v, v[((current_opcode & 0x0F00) >> 8) as usize] == (current_opcode & 0x00FF) as u8);
 				pc += 2;
 			}, 0x4000 => {
 				if v[((current_opcode & 0x0F00) >> 8) as usize] != (current_opcode & 0x00FF) as u8 {
@@ -117,13 +115,13 @@ fn main() {
 					0x03 => v[x] ^= v[y],
 					0x04 => if v[x] > (0xFF - v[y]) {
 							v[0xF] = 1;
-							v[x] -= v[y];
+							v[x] = ((v[x] as u16 + v[y] as u16) & 0xFF) as u8;
 						} else {
 							v[0xF] = 0;
 							v[x] += v[y];
 					}, 0x05 => if v[x] < v[y] {
 							v[0xF] = 1;
-							v[x] = v[y] - v[x];
+							v[x] = (v[x] as u16 + 0xFF - v[y] as u16) as u8;
 						} else {
 							v[0xF] = 0;
 							v[x] -= v[y];
@@ -164,7 +162,13 @@ fn main() {
 				let y = v[((current_opcode & 0x00F0) >> 4) as usize] as usize;
 				v[0xF] = 0x00;
 				for h in 0..(current_opcode & 0x000F) {
+					if y + h as usize > 31 {
+						break;
+					}
 					for i in 0..8 {
+						if i + x > 63 {
+							break;
+						}
 						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
 						if new_bit {
 							if screen[y + h as usize][x + i] {
@@ -174,8 +178,7 @@ fn main() {
 						}
 					}
 				}
-			//println!("\x1B[2J\x1B[1;1H{}", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
-				let _ = fs::write("output", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
+				//let _ = fs::write("output", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
 				pc += 2;
 			}, 0xE000 => {
 				if stored_key == match (current_opcode & 0x00FF) as u8 {
