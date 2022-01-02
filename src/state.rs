@@ -30,8 +30,32 @@ impl Byte {
 		}
 	}
 	
-	pub fn as_usize(self) -> usize {
+	pub fn as_usize(&self) -> usize {
 		self.data as usize
+	}
+
+	pub fn mask_bits(&self, mask: &Self) -> Self {
+		Self::from(self.data & mask.data)
+	}
+
+	pub fn shift_left(&self, amount: u8) -> Self {
+		let mut mask = 0xFF;
+		for b in 0..amount {
+			mask = mask & !(1 << (7 - b));
+		}
+		Self::from((self.data & mask) << amount)
+	}
+
+	pub fn shift_right(&self, amount: u8) -> Self {
+		let mut mask = 0xFF;
+		for b in 0..amount {
+			mask = mask & !(1 << b);
+		}
+		Self::from((self.data & mask) >> amount)
+	}
+
+	pub fn get_bit(&self, bit: u8) -> bool {
+		self.mask_bits(&Byte::from(1).shift_left(bit)).shift_right(bit).data == 1
 	}
 }
 
@@ -65,6 +89,30 @@ impl TwoBytes {
 
 	pub fn as_usize(self) -> usize {
 		self.data as usize
+	}
+
+	pub fn mask_bits(&self, mask: &Self) -> Self {
+		Self::from(self.data & mask.data)
+	}
+
+	pub fn shift_left(&self, amount: u8) -> Self {
+		let mut mask = 0xFF;
+		for b in 0..amount {
+			mask = mask & !(1 << (7 - b));
+		}
+		Self::from((self.data & mask) << amount)
+	}
+
+	pub fn shift_right(&self, amount: u8) -> Self {
+		let mut mask = 0xFF;
+		for b in 0..amount {
+			mask = mask & !(1 << b);
+		}
+		Self::from((self.data & mask) >> amount)
+	}
+
+	pub fn get_bit(&self, bit: u8) -> bool {
+		self.mask_bits(&Byte::from(1).shift_left(bit)).shift_right(bit).data == 1
 	}
 }
 
@@ -110,21 +158,8 @@ impl IndexMut<usize> for Memory {
 }
 
 
-#[derive(Debug, Eq, PartialEq)]
-struct DataRegister {
-	data: Byte
-}
-impl DataRegister {
-	pub fn new() -> Self {
-		Self {
-			data: Byte::new()
-		}
-	}
-}
-
-
 struct DataRegisters {
-	data: Vec<DataRegister>
+	data: Vec<Byte>
 }
 impl DataRegisters {
 	pub fn new(size: u64) -> Self {
@@ -132,16 +167,33 @@ impl DataRegisters {
 			data: Vec::new()
 		};
 		for _ in 0..size {
-			new.data.push(DataRegister::new());
+			new.data.push(Byte::new());
 		}
 		new
 	}
 }
 impl Index<Byte> for DataRegisters {
-	type Output = DataRegister;
+	type Output = Byte;
 
 	fn index(&self, i: Byte) -> &Self::Output {
-		&self.data[i.as_usize()]
+		&self[i.as_usize()]
+	}
+}
+impl Index<usize> for DataRegisters {
+	type Output = Byte;
+
+	fn index(&self, i: usize) -> &Self::Output {
+		&self.data[i]
+	}
+}
+impl IndexMut<Byte> for DataRegisters {
+	fn index_mut(&mut self, i: Byte) -> &mut Self::Output {
+		&mut self.data[i.as_usize()]
+	}
+}
+impl IndexMut<usize> for DataRegisters {
+	fn index_mut(&mut self, i: usize) -> &mut Self::Output {
+		&mut self.data[i]
 	}
 }
 
@@ -212,7 +264,61 @@ impl State {
 fn new_state() {
 	let cut = State::new_chip8();
 	assert_eq!(cut.memory[TwoBytes::from(4095)], Byte::new());
-	assert_eq!(cut.data_registers[Byte::new()], DataRegister::new());
+	assert_eq!(cut.data_registers[Byte::new()], Byte::new());
 	assert_eq!(cut.adress_register.data, TwoBytes::new());
 	assert_eq!(cut.stack.data.len(), 0);
+}
+
+#[test]
+fn memory_indexing() {
+	let mut cut = Memory::new(2);
+	assert_eq!(cut[1], Byte::from(0));
+	cut[1] = Byte::from(2);
+	assert_eq!(cut[1], Byte::from(2));
+	assert_eq!(cut.data[1], Byte::from(2));
+}
+
+#[test]
+fn data_registers_indexing() {
+	let mut cut = DataRegisters::new(2);
+	assert_eq!(cut[1], Byte::from(0));
+	cut[1] = Byte::from(2);
+	assert_eq!(cut[1], Byte::from(2));
+	assert_eq!(cut.data[1], Byte::from(2));
+}
+
+#[test]
+fn byte() {
+	let cut = Byte::from(0b0001_0100);
+	assert_eq!(cut.get_bit(0), false);
+	assert_eq!(cut.get_bit(1), false);
+	assert_eq!(cut.get_bit(2), true);
+	assert_eq!(cut.get_bit(3), false);
+	assert_eq!(cut.get_bit(4), true);
+	assert_eq!(cut.get_bit(5), false);
+	assert_eq!(cut.get_bit(6), false);
+	assert_eq!(cut.get_bit(7), false);
+
+	assert_eq!(cut.as_usize(), 20);
+
+	assert_eq!(cut.shift_left(4), Byte::from(0b0100_0000));
+	assert_eq!(cut.shift_right(4), Byte::from(0b0000_0001));
+}
+
+#[test]
+fn two_bytes() {
+	let cut = TwoBytes::from(0b0000_1110_0000_0000);
+	assert_eq!(cut.get_bit(8), true);
+	assert_eq!(cut.get_bit(9), true);
+	assert_eq!(cut.get_bit(10), true);
+	assert_eq!(cut.get_bit(11), false);
+	assert_eq!(cut.get_bit(12), false);
+	assert_eq!(cut.get_bit(13), false);
+	assert_eq!(cut.get_bit(14), false);
+	assert_eq!(cut.get_bit(15), false);
+
+	assert_eq!(cut.as_usize(), 20);
+
+	assert_eq!(cut.shift_left(4), Byte::from(0b1110_0000_0000_0000));
+	assert_eq!(cut.shift_right(4), Byte::from(0b0000_0000_1110_0000));
 }
