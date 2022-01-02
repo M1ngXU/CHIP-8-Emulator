@@ -1,53 +1,60 @@
-use std::{ thread, time, fs };
+use std::{ thread, time::Duration, fs };
 use std::time::SystemTime;
+use std::collections::LinkedList;
 
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-  0x20, 0x60, 0x20, 0x20, 0x70, // 1
-  0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-  0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-  0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-  0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-  0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-  0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-  0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-  0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-  0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-  0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-  0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-  0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-  0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-  0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+	0x20, 0x60, 0x20, 0x20, 0x70, // 1
+	0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+	0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+	0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+	0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+	0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+	0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+	0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+	0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+	0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+	0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+	0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+	0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+	0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+	0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 ];
 
 fn main() {
 	let start = SystemTime::now();
 
 	let mut memory = [ 0u8; 4096 ];
-	let mut stack = [ 0u16; 15 ];
+	let mut stack = LinkedList::new();
 	let mut v = [ 0u8; 16 ];
 	let mut screen = [ [ false; 64 ]; 32 ];
 
 	FONT.iter().enumerate().for_each(| (i, &b) | memory[i] = b);
 	let programm = fs::read("./Pong.ch8").expect("Failed to read programm.");
 	programm.iter().enumerate().for_each(| (i, &b) | memory[i + 0x200] = b);
+	//println!("{:x?}", memory);
+	//panic!();
+	println!("\x1B[2J\x1b[?25l");
 	
 	let mut delay_timer = 0;
 	let mut sound_timer = 0;
+	let mut last_frame = SystemTime::now();
+	let mut last_opcode;
+	let speed = 500;
 
 	let mut pc = 0x200u16;
 	let mut index_pointer = 0;
-	let mut stack_pointer = 0;
 	let mut stored_key = false;
 	let mut awaiting_key = None;
 
 	while pc < 0x200 + programm.len() as u16 {
 		if let Some(register) = awaiting_key {
-			v[register] = 0;
+			v[register] = 0x0F;
 			stored_key = true;
 			awaiting_key = None;
 			continue;
 		}
+		last_opcode = SystemTime::now();
 
 		let start_of_frame = SystemTime::now();
 		let current_opcode = (memory[pc as usize] as u16) << 8 | memory[pc as usize + 1] as u16;
@@ -56,32 +63,32 @@ fn main() {
 			0x0000 => {
 				match current_opcode & 0x0FFF {
 					0x00E0 => {
-						//pc += 2;
-						todo!("Clear screen");
-					},
-					0x00EE => {
-						pc = stack[stack_pointer - 1];
-						stack_pointer -= 1;
-					},
-					_ => {
+						pc += 2;
+						screen = [ [ false; 64 ]; 32 ];
+						print!("\x1B[2J\x1B[1;1H");
+					}, 0x00EE => {
+						pc = stack.pop_back().unwrap();
+					}, _ => {
 						//pc += 2;
 						todo!("not necessary?");
 					}
 				}
-			}, 0x1000 => pc = current_opcode & 0x0FFF,
-			0x2000 => {
-				stack[stack_pointer] = pc;
-				stack_pointer += 1;
+			}, 0x1000 => {
+				let new_pc = current_opcode & 0x0FFF;
+				if pc == new_pc {
+					break;
+				}
+				pc = new_pc;
+			}, 0x2000 => {
+				stack.push_back(pc);
 				pc = current_opcode & 0x0FFF;
 			}, 0x3000 => {
-				let x = ((current_opcode & 0x0F00) >> 8) as usize;
-				if v[x] == (current_opcode & 0x00FF) as u8 {
+				if v[((current_opcode & 0x0F00) >> 8) as usize] == (current_opcode & 0x00FF) as u8 {
 					pc += 2;
 				}
 				pc += 2;
 			}, 0x4000 => {
-				let x = ((current_opcode & 0x0F00) >> 8) as usize;
-				if v[x] != (current_opcode & 0x00FF) as u8 {
+				if v[((current_opcode & 0x0F00) >> 8) as usize] != (current_opcode & 0x00FF) as u8 {
 					pc += 2;
 				}
 				pc += 2;
@@ -93,12 +100,12 @@ fn main() {
 				}
 				pc += 2;
 			}, 0x6000 => {
-				let x = ((current_opcode & 0x0F00) >> 8) as usize;
-				v[x] = (current_opcode & 0x00FF) as u8;
+				v[((current_opcode & 0x0F00) >> 8) as usize] = (current_opcode & 0x00FF) as u8;
 				pc += 2;
 			}, 0x7000 => {
 				let x = ((current_opcode & 0x0F00) >> 8) as usize;
-				v[x] += (current_opcode & 0x00FF) as u8;
+				let y = (current_opcode & 0x00FF) as u8;
+				v[x] = ((v[x] as u16 + y as u16) & 0xFF) as u8;
 				pc += 2;
 			}, 0x8000 => {
 				let x = ((current_opcode & 0x0F00) >> 8) as usize;
@@ -114,21 +121,25 @@ fn main() {
 						} else {
 							v[0xF] = 0;
 							v[x] += v[y];
-						},
-					0x05 => if v[x] < v[y] {
+					}, 0x05 => if v[x] < v[y] {
 							v[0xF] = 1;
 							v[x] = v[y] - v[x];
 						} else {
 							v[0xF] = 0;
 							v[x] -= v[y];
-						},
-					0x07 => if v[x] > v[y] {
-							v[0xF] = 1;
+						}, 0x06 => {
+						v[0xF] = (current_opcode as u8 & 0b1000_0000) >> 7;
+						v[x] = (current_opcode as u8 & 0b0111_1111) << 1;
+					}, 0x07 => if v[x] > v[y] {
+							v[0xF] = 0;
 							v[x] = v[x] - v[y];
 						} else {
-							v[0xF] = 0;
+							v[0xF] = 1;
 							v[x] = v[y] - v[x];
-						},
+					}, 0x08 => {
+						v[0xF] = current_opcode as u8 & 0b0000_0001;
+						v[x] = (current_opcode as u8 & 0b1111_1110) << 1;
+					},
 					_ => panic!("Unknown Operation {}.", current_opcode)
 				};
 				pc += 2;
@@ -149,25 +160,28 @@ fn main() {
 				v[((current_opcode & 0x0F00) >> 8) as usize] = rand as u8;
 				pc += 2;
 			}, 0xD000 => {
-				let x = ((current_opcode & 0x0F00) >> 8) as usize;
-				let y = ((current_opcode & 0x00F0) >> 4) as usize;
+				let x = v[((current_opcode & 0x0F00) >> 8) as usize] as usize;
+				let y = v[((current_opcode & 0x00F0) >> 4) as usize] as usize;
 				v[0xF] = 0x00;
-				for h in 0..=current_opcode & 0x000F {
+				for h in 0..(current_opcode & 0x000F) {
 					for i in 0..8 {
-						// get the byte in the memory, 'remove' non-important bits, check if that bit is '1'
-						let new_bit = memory[index_pointer as usize + h as usize] & (1 << (x % 8 + i) % 8) == 1 << (x % 8 + i) % 8;
-						if screen[y][x + i] && new_bit {
-							v[0xF] = 0x01;
+						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
+						if new_bit {
+							if screen[y + h as usize][x + i] {
+								v[0xF] = 0x01;
+							}
+							screen[y + h as usize][x + i] = !screen[y + h as usize][x + i];
 						}
-						screen[y][x + i] = !new_bit;
 					}
 				}
+			//println!("\x1B[2J\x1B[1;1H{}", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
+				let _ = fs::write("output", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { "░" }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
 				pc += 2;
 			}, 0xE000 => {
 				if stored_key == match (current_opcode & 0x00FF) as u8 {
 					0x9E => true,
 					0xA1 => false,
-					_ => panic!("Unknown key opcode {}.", current_opcode)
+					_ => panic!("Unknown key opcode {:x}.", current_opcode)
 				} {
 					pc += 2;
 				}
@@ -201,19 +215,22 @@ fn main() {
 						}
 					}, _ => panic!("Unknown memory opcode {}.", current_opcode)
 				}
+				pc += 2;
 			}
 			_ => panic!("Unknown opcode {:x}.", current_opcode)
 		}
 		
-		if delay_timer > 0 {
-			delay_timer -= 1;
-		}
-		if sound_timer > 0 {
-			if sound_timer == 1 {
-				println!("BEEP!");
+		if last_frame.elapsed().unwrap().as_millis() as f32 > 1000.0 / 60.0 {
+			last_frame = SystemTime::now();
+			println!("\x1B[1;1H{}", screen.iter().map(| row | row.iter().map(| o | if *o { "█"} else { " " }).collect::<Vec<&str>>().join("").to_string()).collect::<Vec<String>>().join("\n"));
+			if delay_timer > 0 {
+				delay_timer -= 1;
 			}
-			sound_timer -= 1;
+			if sound_timer > 0 {
+				println!("BEEP!");
+				sound_timer -= 1;
+			}
 		}
-		thread::sleep(time::Duration::from_millis((60 - start_of_frame.elapsed().unwrap().as_millis()) as u64));
+		thread::sleep(Duration::from_millis(0.0f64.max(1000.0 / speed as f64 - last_opcode.elapsed().unwrap().as_millis() as f64) as u64));
 	}
 }
