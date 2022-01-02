@@ -163,13 +163,7 @@ fn main() {
 				let y = v[((current_opcode & 0x00F0) >> 4) as usize] as usize;
 				v[0xF] = 0x00;
 				for h in 0..(current_opcode & 0x000F) {
-					if y + h as usize > 31 {
-						break;
-					}
 					for i in 0..8 {
-						if i + x > 63 {
-							break;
-						}
 						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
 						if new_bit {
 							if screen.get(x + i, y + h as usize) {
@@ -236,4 +230,5 @@ fn main() {
 		}
 		thread::sleep(Duration::from_millis(0.0f64.max(1000.0 / speed as f64 - last_opcode.elapsed().unwrap().as_millis() as f64) as u64));
 	}
+	screen.update();
 }
