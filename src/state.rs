@@ -4,7 +4,7 @@ use std::fmt;
 use std::ops::{ Index, IndexMut };
 
 #[derive(Eq, PartialEq, Copy, Clone)]
-struct Byte {
+pub struct Byte {
 	data: u8
 }
 impl Display for Byte {
@@ -60,6 +60,10 @@ impl Byte {
 
 	pub fn add_byte(&self, byte: Byte) -> Byte {
 		Byte::from(((self.data as u16 + 0xFF + byte.data as u16) & 0xFF) as u8)
+	}
+
+	pub fn add(&self, amount: u8) -> Byte {
+		Byte::from(((self.data as u16 + 0xFF + amount as u16) & 0xFF) as u8)
 	}
 }
 
@@ -129,6 +133,14 @@ impl TwoBytes {
 
 	pub fn increase_with_byte(&mut self, byte: Byte) {
 		self.data += byte.data as u16;
+	}
+
+	pub fn add_byte(&self, byte: Byte) -> Self {
+		Self::from(self.data + byte.data as u16)
+	}
+
+	pub fn add(&self, amount: u16) -> Self {
+		Self::from(self.data + amount)
 	}
 }
 
@@ -246,35 +258,27 @@ impl IndexMut<usize> for DataRegisters {
 }
 
 
-struct AdressRegister {
-	data: TwoBytes
-}
-impl AdressRegister {
-	pub fn new() -> Self {
-		Self {
-			data: TwoBytes::new()
-		}
-	}
-}
-
-
-struct State {
-	memory: Memory,
+pub struct State {
+	pub memory: Memory,
 	data_registers: DataRegisters,
-	adress_register: AdressRegister,
+	adress_register: TwoBytes,
 	stack: LinkedList<TwoBytes>,
 	pc: TwoBytes,
-	screen: super::screen::Screen
+	pub screen: super::screen::Screen,
+	delay_timer: Byte,
+	sound_timer: Byte
 }
 impl State {
 	pub fn new_chip8() -> Self {
 		let mut new = Self {
 			memory: Memory::new(4096),
 			data_registers: DataRegisters::new(16),
-			adress_register: AdressRegister::new(),
+			adress_register: TwoBytes::new(),
 			stack: LinkedList::new(),
 			pc: TwoBytes::from(0x200),
-			screen: super::screen::Screen::new(64, 32)
+			screen: super::screen::Screen::new(64, 32),
+			delay_timer: Byte::new(),
+			sound_timer: Byte::new()
 		};
 		for (i, b) in [
 			0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -315,9 +319,8 @@ impl State {
 				0x00E0 => {
 					self.screen.clear();
 					self.pc.increase(2);
-				}, 0x00EE => {
-					self.pc = self.stack.pop_back().unwrap();
-				}, _ => {
+				}, 0x00EE => self.pc = self.stack.pop_back().unwrap(),
+				_ => {
 					todo!("not necessary?");
 				}
 			}, 0x1 => {
@@ -377,37 +380,55 @@ impl State {
 			}, 0x9000 => if x.data != y.data {
 				self.pc.increase(2);
 			}, 0xA000 => self.adress_register = l3_const,
-			0xB000 => {
-				pc = current_opcode & 0x0FFF + v[0] as u16;
-			}, 0xC000 => {
-				let rand = start.elapsed().unwrap().as_nanos() % (current_opcode & 0x00FF) as u128;
+			0xB000 => self.pc = l3_const.add_byte(self.data_registers.get_0()),
+			0xC000 => {
+				unimplemented!("RAND");
+				/*let rand = start.elapsed().unwrap().as_nanos() % (current_opcode & 0x00FF) as u128;
 				v[((current_opcode & 0x0F00) >> 8) as usize] = rand as u8;
-				pc += 2;
+				pc += 2;*/
 			}, 0xD000 => {
-				let x = v[((current_opcode & 0x0F00) >> 8) as usize] as usize;
-				let y = v[((current_opcode & 0x00F0) >> 4) as usize] as usize;
-				v[0xF] = 0x00;
-				for h in 0..(current_opcode & 0x000F) {
+				self.data_registers.set_f(Byte::from(0));
+				for h in 0..current.mask_bits(&TwoBytes::from(0x000F)).data {
 					for i in 0..8 {
-						let new_bit = (memory[(index_pointer + h) as usize] & (1 << (7 - i))) >> (7 - i) == 1;
-						if new_bit {
-							if screen.get(x + i, y + h as usize) {
-								v[0xF] = 0x1;
+						if self.memory[self.adress_register.add(h)].mask_bits(&Byte::from(1).shift_left(7 - i)).shift_right(7 - i).data == 1 {
+							let screen_x = x.as_usize() + i as usize;
+							let screen_y = y.as_usize() + h as usize;
+							if self.screen.get(screen_x, screen_y) {
+								self.data_registers.set_f(Byte::from(1));
 							}
-							screen.swap(x + i, y + h as usize);
+							self.screen.swap(screen_x, screen_y);
 						}
 					}
 				}
-				pc += 2;
 			}, 0xE000 => {
-				if stored_key == match (current_opcode & 0x00FF) as u8 {
+				unimplemented!("KEYS");
+				/*if stored_key == match (current_opcode & 0x00FF) as u8 {
 					0x9E => true,
 					0xA1 => false,
 					_ => panic!("Unknown key opcode {:x}.", current_opcode)
 				} {
 					pc += 2;
 				}
-				pc += 2;
+				pc += 2;*/
+			}, 0xF000 => {
+				match l2_const.data as u8 {
+					0x07 => self.data_registers.set_x(current, self.delay_timer),
+					0x0A => {
+						unimplemented!("KEYS");
+					}, 0x15 => self.delay_timer = x,
+					0x18 => self.sound_timer = x,
+					0x1E => self.adress_register.increase_with_byte(x),
+					0x29 => self.adress_register = TwoBytes::from(x.data as u16 * 5),
+					0x33 => {
+						self.memory[self.adress_register.as_usize()] = x.shift_right(5);
+						self.memory[self.adress_register.as_usize() + 1] = x.shift_left(3).shift_right(6);
+						self.memory[self.adress_register.as_usize() + 2] = x.shift_left(5).shift_right(5);
+					}, 0x55 => for i in 0..=x.as_usize() {
+						self.memory[self.adress_register.as_usize() + i] = self.data_registers[i];
+					}, 0x65 => for i in 0..=x.as_usize() {
+						self.data_registers[i] = self.memory[self.adress_register.as_usize() + i];
+					}, _ => panic!("Unknown memory opcode {}.", current.data)
+				}
 			}
 		}
 		false
@@ -419,8 +440,8 @@ fn new_state() {
 	let cut = State::new_chip8();
 	assert_eq!(cut.memory[TwoBytes::from(4095)], Byte::new());
 	assert_eq!(cut.data_registers[Byte::new()], Byte::new());
-	assert_eq!(cut.adress_register.data, TwoBytes::new());
-	assert_eq!(cut.stack.data.len(), 0);
+	assert_eq!(cut.adress_register, TwoBytes::new());
+	assert_eq!(cut.stack.len(), 0);
 }
 
 #[test]

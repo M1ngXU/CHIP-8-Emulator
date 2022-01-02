@@ -25,28 +25,31 @@ static FONT: [ u8; 80 ] = [
 fn main() {
 	let start = SystemTime::now();
 
-	let mut memory = [ 0u8; 4096 ];
+	/*let mut memory = [ 0u8; 4096 ];
 	let mut stack = LinkedList::new();
-	let mut v = [ 0u8; 16 ];
-	let mut screen = screen::Screen::new(64, 32);
+	let mut v = [ 0u8; 16 ];*/
+	let mut p = state::State::new_chip8();
 
-	FONT.iter().enumerate().for_each(| (i, &b) | memory[i] = b);
+	FONT.iter().enumerate().for_each(| (i, &b) | p.memory[i] = state::Byte::from(b));
 	let programm = fs::read("./IBM.ch8").expect("Failed to read programm.");
-	programm.iter().enumerate().for_each(| (i, &b) | memory[i + 0x200] = b);
+	programm.iter().enumerate().for_each(| (i, &b) | p.memory[i + 0x200] = state::Byte::from(b));
 	//println!("{:x?}", memory);
 	//panic!();
 	//println!("\x1B[2J\x1b[?25l");
-	
+	/*
 	let mut delay_timer = 0;
 	let mut sound_timer = 0;
 	let mut last_frame = SystemTime::now();
-	let mut last_opcode;
 	let speed = 500;
 
 	let mut pc = 0x200u16;
 	let mut index_pointer = 0;
 	let mut stored_key = false;
-	let mut awaiting_key = None;
+	let mut awaiting_key = None;*/
+
+	while !p.interpret_next() {
+		p.screen.update();
+	}/*
 
 	while pc < 0x200 + programm.len() as u16 {
 		if let Some(register) = awaiting_key {
@@ -230,5 +233,5 @@ fn main() {
 		}
 		thread::sleep(Duration::from_millis(0.0f64.max(1000.0 / speed as f64 - last_opcode.elapsed().unwrap().as_millis() as f64) as u64));
 	}
-	screen.update();
+	screen.update();*/
 }
