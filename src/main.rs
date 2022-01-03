@@ -1,7 +1,9 @@
 use std::{ thread, fs };
 use std::time::{ SystemTime, Duration };
-mod state;
+
+mod structs;
 mod screen;
+
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
 	0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -18,19 +20,19 @@ static FONT: [ u8; 80 ] = [
 	0xF0, 0x80, 0x80, 0x80, 0xF0, // C
 	0xE0, 0x90, 0x90, 0x90, 0xE0, // D
 	0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-	0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+	0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
 fn main() {
-	let mut virtual_machine_state = state::State::new_chip8();
+	let mut virtual_machine_state = structs::State::new_chip8();
 
 	virtual_machine_state.load_memory(FONT.to_vec(), 0);
 	virtual_machine_state.load_memory(fs::read("./tictac.ch8").expect("Failed to read programm."), 0x200);
 	
 	let mut last_frame = SystemTime::now();
 	let mut last_opcode = SystemTime::now();
-	let speed = 500;
-	let hz = 1000.0 / 60.0;
+	let speed = 5000;
+	let hz = 1000.0 / 10.0;
 
 	while !virtual_machine_state.interpret_next() {
 		if last_frame.elapsed().unwrap().as_millis() as f64 > hz {
