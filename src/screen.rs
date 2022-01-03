@@ -1,3 +1,6 @@
+use std::io::Write;
+use std::io;
+
 fn get_sized_vec<T: Copy>(value: T, width: usize, height: usize) -> Vec<Vec<T>> {
 	let mut new = Vec::new();
 	for _ in 0..height {
@@ -14,7 +17,7 @@ pub struct Screen {
 impl Screen {
 	pub fn new(width: usize, height: usize) -> Self {
 		//clear screen & hide cursor
-		//println!("\x1B[2J\x1b[?25l");
+		println!("\x1B[2J\x1b[?25l");
 		Self {
 			pix: get_sized_vec(false, width, height),
 			width,
@@ -50,9 +53,26 @@ impl Screen {
 			"\x1B[1;1H{}",
 			self.pix.iter()
 				.map(| row |
-					row.iter().map(| o | if *o { "█" } else { " " })
+					row.iter().map(| o | if *o { "#" } else { " " })
 						.collect::<Vec<&str>>().join("").to_string()
 				).collect::<Vec<String>>().join("\n")
 		);
+	}
+
+	pub fn get_input(&self) -> u8 {
+		self.update();
+		let mut s;
+		loop {
+			s = String::new();
+			println!("\x1B[{};1HPress a hex key ...", self.height);
+			println!("       ");
+			print!("\x1B[{};1H", self.height + 1);
+			io::stdout().flush().unwrap();
+			io::stdin().read_line(&mut s).expect("Failed to read line");
+			if let Ok(v) = u8::from_str_radix(&s[0..1], 16) {
+				print!("\x1B[{};1H                               \n                              ", self.height);
+				break v;
+			}
+		}
 	}
 }

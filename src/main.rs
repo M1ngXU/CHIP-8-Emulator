@@ -22,12 +22,10 @@ static FONT: [ u8; 80 ] = [
 ];
 
 fn main() {
-	let start = SystemTime::now();
-	
 	let mut virtual_machine_state = state::State::new_chip8();
 
 	virtual_machine_state.load_memory(FONT.to_vec(), 0);
-	virtual_machine_state.load_memory(fs::read("./IBM.ch8").expect("Failed to read programm."), 0x200);
+	virtual_machine_state.load_memory(fs::read("./tictac.ch8").expect("Failed to read programm."), 0x200);
 	
 	let mut last_frame = SystemTime::now();
 	let mut last_opcode = SystemTime::now();
