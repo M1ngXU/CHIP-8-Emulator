@@ -1,4 +1,4 @@
 .replit
 replit.nix
 Cargo.lock
-/target
+target/
