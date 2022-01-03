@@ -65,6 +65,10 @@ impl Byte {
 	pub fn add(&self, amount: u8) -> Byte {
 		Byte::from(((self.data as u16 + amount as u16) & 0xFF) as u8)
 	}
+	
+	pub fn decrease(&mut self, amount: u8) {
+		self.data -= amount;
+	}
 }
 
 
@@ -259,12 +263,12 @@ impl IndexMut<usize> for DataRegisters {
 
 
 pub struct State {
-	pub memory: Memory,
+	memory: Memory,
 	data_registers: DataRegisters,
 	adress_register: TwoBytes,
 	stack: LinkedList<TwoBytes>,
 	pc: TwoBytes,
-	pub screen: super::screen::Screen,
+	screen: super::screen::Screen,
 	delay_timer: Byte,
 	sound_timer: Byte
 }
@@ -282,8 +286,19 @@ impl State {
 		}
 	}
 
-	pub fn update_screen(&self) {
-		self.screen.update()
+	pub fn next_frame(&mut self) {
+		self.screen.update();
+		if self.delay_timer.data > 0 {
+			self.delay_timer.decrease(1);
+		}
+		if self.sound_timer.data > 0 {
+			self.sound_timer.decrease(1);
+			println!("BUZZ!");
+		}
+	}
+
+	pub fn shut_down(&self) {
+		self.screen.update();
 	}
 
 	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_adress: u16) {
@@ -340,27 +355,27 @@ impl State {
 					}
 					self.data_registers.set_x(current, x.add_byte(y));
 				}, 0x5 => {
-					self.data_registers.set_f(Byte::new());
+					self.data_registers.set_f(Byte::from(1));
 					if x.data < y.data {
-						self.data_registers.set_f(Byte::from(1));
-						self.data_registers.set_x(current, Byte::from((x.data as u16 + 0xFF - y.data as u16) as u8));
+						self.data_registers.set_f(Byte::from(0));
+						self.data_registers.set_x(current, Byte::from(0xFF - y.data + x.data + 0x01));
 					} else {
 						self.data_registers.set_x(current, Byte::from(x.data - y.data));
 					}
 				}, 0x6 => {
-					self.data_registers.set_f(Byte::from(if current.get_bit(7) { 1 } else { 0 }));
-					self.data_registers.set_x(current, Byte::from(((current.data & 0b0111_1111) << 1) as u8));
+					self.data_registers.set_f(Byte::from(if x.get_bit(0) { 1 } else { 0 }));
+					self.data_registers.set_x(current, x.shift_right(1));
 				}, 0x7 => {
 					self.data_registers.set_f(Byte::new());
 					if y.data < x.data {
 						self.data_registers.set_f(Byte::from(1));
-						self.data_registers.set_x(current, Byte::from((y.data as u16 + 0xFF - x.data as u16) as u8));
+						self.data_registers.set_x(current, Byte::from((y.data as u16 + 0x100 - x.data as u16) as u8));
 					} else {
 						self.data_registers.set_x(current, Byte::from(y.data - x.data));
 					}
 				}, 0x8 => {
-					self.data_registers.set_f(Byte::from(if current.get_bit(0) { 1 } else { 0 }));
-					self.data_registers.set_x(current, Byte::from(((current.data & 0b1111_1110) >> 1) as u8));
+					self.data_registers.set_f(Byte::from(if x.get_bit(7) { 1 } else { 0 }));
+					self.data_registers.set_x(current, x.shift_left(1));
 				},
 				_ => panic!("Unknown Variable Operation {}.", current)
 			}, 0x9 => if x.data != y.data {
@@ -419,6 +434,113 @@ impl State {
 		}
 		false
 	}
+}
+
+#[test]
+fn goto() {
+	let mut cut = State::new_chip8();
+	cut.load_memory(vec![ 0x10, 0x11 ], 0x200);
+	assert_eq!(cut.pc.data, 0x200);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x011);
+}
+
+#[test]
+fn subroutine() {
+	let mut cut = State::new_chip8();
+	// call subroutine, then return
+	cut.load_memory(vec![ 0x22, 0x04, 0x00, 0x00, 0x00, 0xEE ], 0x200);
+	assert_eq!(cut.pc.data, 0x200);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x204);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x202);
+}
+
+#[test]
+fn compare_data_registers() {
+	let mut cut = State::new_chip8();
+	// set vx, vy, then compare
+	cut.load_memory(vec![ 0x60, 0x01, 0x61, 0x01, 0x30, 0x01, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x50, 0x10, 0x00, 0x00, 0x90, 0x10 ], 0x200);
+	assert_eq!(cut.data_registers[0].data, 0x00);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[0].data, 0x01);
+	assert_eq!(cut.data_registers[1].data, 0x00);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x208);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x20c);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x210);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.pc.data, 0x212);
+}
+
+#[test]
+fn data_register_operations() {
+	let mut cut = State::new_chip8();
+	// set vx, vy, then operate
+	cut.load_memory(vec![
+		0x60, 0x05, // 0 = 5
+		0x70, 0x01, // 0 += 1
+		0x61, 0x01, // 1 = 1
+		0x82, 0x00, // 2 = v0
+		0x81, 0x01, // 1 |= v0
+		0x81, 0x03, // 1 ^= v0
+		0x61, 0x07, // 1 = 1
+		0x81, 0x02, // 1 &= v0
+		0x81, 0x04, // 1 += v0
+		0x61, 0xFF, // 1 = FF
+		0x81, 0x04, // 1 += v0
+		0x60, 0x02, // 0 = 2
+		0x81, 0x05, // 1 -= v0
+		0x61, 0x01, // 1 = 1
+		0x81, 0x05, // 1 -= v0
+		0x60, 0x01, // 0 = 1
+		0x61, 0xFF, // 0 = 1
+		0x80, 0x06, // 0 >>= 1
+		0x81, 0x08, // 1 <<= 1
+	], 0x200);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[0].data, 0x05);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[0].data, 0x06);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[2].data, 0x06);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x07);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x06);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x0c);
+	assert_eq!(cut.data_registers[0xF].data, 0x00);
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x05);
+	assert_eq!(cut.data_registers[0xF].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0x03);
+	assert_eq!(cut.data_registers[0xF].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0xFF);
+	assert_eq!(cut.data_registers[0xF].data, 0x00);
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[0].data, 0x00);
+	assert_eq!(cut.data_registers[0xF].data, 0x01);
+	assert!(!cut.interpret_next());
+	assert_eq!(cut.data_registers[1].data, 0b1111_1110);
+	assert_eq!(cut.data_registers[0xF].data, 0x01);
 }
 
 #[test]

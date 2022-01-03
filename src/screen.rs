@@ -14,7 +14,7 @@ pub struct Screen {
 impl Screen {
 	pub fn new(width: usize, height: usize) -> Self {
 		//clear screen & hide cursor
-		println!("\x1B[2J\x1b[?25l");
+		//println!("\x1B[2J\x1b[?25l");
 		Self {
 			pix: get_sized_vec(false, width, height),
 			width,
