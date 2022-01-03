@@ -24,31 +24,20 @@ static FONT: [ u8; 80 ] = [
 
 fn main() {
 	let start = SystemTime::now();
+	
+	let mut virtual_machine_state = state::State::new_chip8();
 
-	/*let mut memory = [ 0u8; 4096 ];
-	let mut stack = LinkedList::new();
-	let mut v = [ 0u8; 16 ];*/
-	let mut p = state::State::new_chip8();
-
-	FONT.iter().enumerate().for_each(| (i, &b) | p.memory[i] = state::Byte::from(b));
-	let programm = fs::read("./IBM.ch8").expect("Failed to read programm.");
-	programm.iter().enumerate().for_each(| (i, &b) | p.memory[i + 0x200] = state::Byte::from(b));
-	//println!("{:x?}", memory);
-	//panic!();
-	//println!("\x1B[2J\x1b[?25l");
-	/*
-	let mut delay_timer = 0;
-	let mut sound_timer = 0;
+	virtual_machine_state.load_memory(FONT.to_vec(), 0);
+	virtual_machine_state.load_memory(fs::read("./IBM.ch8").expect("Failed to read programm."), 0x200);
+	
 	let mut last_frame = SystemTime::now();
+	let mut last_opcode = SystemTime::now();
 	let speed = 500;
 
-	let mut pc = 0x200u16;
-	let mut index_pointer = 0;
-	let mut stored_key = false;
-	let mut awaiting_key = None;*/
-
-	while !p.interpret_next() {
-		p.screen.update();
+	while !virtual_machine_state.interpret_next() {
+		thread::sleep(Duration::from_millis((1000.0 / speed as f64 - last_opcode.elapsed().unwrap().as_millis() as f64) as u64));
+		last_opcode = SystemTime::now();
+		virtual_machine_state.screen.update();
 	}/*
 
 	while pc < 0x200 + programm.len() as u16 {

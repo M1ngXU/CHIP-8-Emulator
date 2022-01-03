@@ -59,11 +59,11 @@ impl Byte {
 	}
 
 	pub fn add_byte(&self, byte: Byte) -> Byte {
-		Byte::from(((self.data as u16 + 0xFF + byte.data as u16) & 0xFF) as u8)
+		Byte::from(((self.data as u16 + byte.data as u16) & 0xFF) as u8)
 	}
 
 	pub fn add(&self, amount: u8) -> Byte {
-		Byte::from(((self.data as u16 + 0xFF + amount as u16) & 0xFF) as u8)
+		Byte::from(((self.data as u16 + amount as u16) & 0xFF) as u8)
 	}
 }
 
@@ -146,7 +146,7 @@ impl TwoBytes {
 
 
 #[derive(Debug)]
-struct Memory {
+pub struct Memory {
 	data: Vec<Byte>
 }
 impl Memory {
@@ -161,7 +161,7 @@ impl Memory {
 	}
 
 	pub fn get_two_bytes(&self, start: TwoBytes) -> TwoBytes {
-		TwoBytes::from((self[start].data as u16) << 8 + self[start.data as usize + 1].data)
+		TwoBytes::from(((self[start].data as u16) << 8) + self[start.data as usize + 1].data as u16)
 	}
 }
 impl Index<TwoBytes> for Memory {
@@ -270,7 +270,7 @@ pub struct State {
 }
 impl State {
 	pub fn new_chip8() -> Self {
-		let mut new = Self {
+		Self {
 			memory: Memory::new(4096),
 			data_registers: DataRegisters::new(16),
 			adress_register: TwoBytes::new(),
@@ -279,28 +279,17 @@ impl State {
 			screen: super::screen::Screen::new(64, 32),
 			delay_timer: Byte::new(),
 			sound_timer: Byte::new()
-		};
-		for (i, b) in [
-			0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-			0x20, 0x60, 0x20, 0x20, 0x70, // 1
-			0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-			0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-			0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-			0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-			0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-			0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-			0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-			0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-			0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-			0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-			0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-			0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-			0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-			0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-		].into_iter().enumerate() {
-			new.memory[i] = Byte::from(b);
 		}
-		new
+	}
+
+	pub fn update_screen(&self) {
+		self.screen.update()
+	}
+
+	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_adress: u16) {
+		for (i, b) in bytes.into_iter().enumerate() {
+			self.memory[i + starting_adress as usize] = Byte::from(b);
+		}
 	}
 
 	pub fn interpret_next(&mut self) -> bool {
@@ -311,15 +300,15 @@ impl State {
 		let l2_const = current.mask_bits(&TwoBytes::from(0x00FF)).as_byte();
 		let l1_const = current.mask_bits(&TwoBytes::from(0x000F)).as_byte();
 		match current.shift_right(12).as_usize() {
-			0x0 | 0x1 | 0x2 | 0xB => {},
+			0x0 | 0x1 | 0xB => {},
 			_ => self.pc.increase(2)
 		};
 		match current.shift_right(12).as_usize() {
 			0x0 => match l3_const.data {
-				0x00E0 => {
+				0x0E0 => {
 					self.screen.clear();
 					self.pc.increase(2);
-				}, 0x00EE => self.pc = self.stack.pop_back().unwrap(),
+				}, 0x0EE => self.pc = self.stack.pop_back().unwrap(),
 				_ => {
 					todo!("not necessary?");
 				}
@@ -331,29 +320,26 @@ impl State {
 			}, 0x2 => {
 				self.stack.push_back(self.pc);
 				self.pc = l3_const;
-			}, 0xB => {
-				self.pc = l3_const;
-				self.pc.increase_with_byte(self.data_registers.get_0());
-			}, 0x3000 => if x == l2_const {
+			}, 0x3 => if x == l2_const {
 				self.pc.increase(2)
-			}, 0x4000 => if x != l2_const {
+			}, 0x4 => if x != l2_const {
 				self.pc.increase(2);
-			}, 0x5000 => if x == y {
+			}, 0x5 => if x == y {
 				self.pc.increase(2);
-			}, 0x6000 => self.data_registers.set_x(current, l2_const),
-			0x7000 => self.data_registers.set_x(current, x.add_byte(y)),
-			0x8000 => match l1_const.data {
-				0x00 => self.data_registers.set_x(current, y),
-				0x01 => self.data_registers.set_x(current, Byte::from(x.data | y.data)),
-				0x02 => self.data_registers.set_x(current, Byte::from(x.data & y.data)),
-				0x03 => self.data_registers.set_x(current, Byte::from(x.data ^ y.data)),
-				0x04 => {
+			}, 0x6 => self.data_registers.set_x(current, l2_const),
+			0x7 => self.data_registers.set_x(current, x.add_byte(l2_const)),
+			0x8 => match l1_const.data {
+				0x0 => self.data_registers.set_x(current, y),
+				0x1 => self.data_registers.set_x(current, Byte::from(x.data | y.data)),
+				0x2 => self.data_registers.set_x(current, x.mask_bits(&y)),
+				0x3 => self.data_registers.set_x(current, Byte::from(x.data ^ y.data)),
+				0x4 => {
 					self.data_registers.set_f(Byte::new());
 					if x.data > (0xFF - y.data) {
 						self.data_registers.set_f(Byte::from(1));
 					}
 					self.data_registers.set_x(current, x.add_byte(y));
-				}, 0x05 => {
+				}, 0x5 => {
 					self.data_registers.set_f(Byte::new());
 					if x.data < y.data {
 						self.data_registers.set_f(Byte::from(1));
@@ -361,10 +347,10 @@ impl State {
 					} else {
 						self.data_registers.set_x(current, Byte::from(x.data - y.data));
 					}
-				}, 0x06 => {
-					self.data_registers.set_f(Byte::from(((current.data & 0b1000_0000) >> 7) as u8));
+				}, 0x6 => {
+					self.data_registers.set_f(Byte::from(if current.get_bit(7) { 1 } else { 0 }));
 					self.data_registers.set_x(current, Byte::from(((current.data & 0b0111_1111) << 1) as u8));
-				}, 0x07 => {
+				}, 0x7 => {
 					self.data_registers.set_f(Byte::new());
 					if y.data < x.data {
 						self.data_registers.set_f(Byte::from(1));
@@ -372,21 +358,21 @@ impl State {
 					} else {
 						self.data_registers.set_x(current, Byte::from(y.data - x.data));
 					}
-				}, 0x08 => {
-					self.data_registers.set_f(Byte::from((current.data & 0b0000_0001) as u8));
+				}, 0x8 => {
+					self.data_registers.set_f(Byte::from(if current.get_bit(0) { 1 } else { 0 }));
 					self.data_registers.set_x(current, Byte::from(((current.data & 0b1111_1110) >> 1) as u8));
 				},
 				_ => panic!("Unknown Variable Operation {}.", current)
-			}, 0x9000 => if x.data != y.data {
+			}, 0x9 => if x.data != y.data {
 				self.pc.increase(2);
-			}, 0xA000 => self.adress_register = l3_const,
-			0xB000 => self.pc = l3_const.add_byte(self.data_registers.get_0()),
-			0xC000 => {
+			}, 0xA => self.adress_register = l3_const,
+			0xB => self.pc = l3_const.add_byte(self.data_registers.get_0()),
+			0xC => {
 				unimplemented!("RAND");
 				/*let rand = start.elapsed().unwrap().as_nanos() % (current_opcode & 0x00FF) as u128;
 				v[((current_opcode & 0x0F00) >> 8) as usize] = rand as u8;
 				pc += 2;*/
-			}, 0xD000 => {
+			}, 0xD => {
 				self.data_registers.set_f(Byte::from(0));
 				for h in 0..current.mask_bits(&TwoBytes::from(0x000F)).data {
 					for i in 0..8 {
@@ -400,7 +386,7 @@ impl State {
 						}
 					}
 				}
-			}, 0xE000 => {
+			}, 0xE => {
 				unimplemented!("KEYS");
 				/*if stored_key == match (current_opcode & 0x00FF) as u8 {
 					0x9E => true,
@@ -410,7 +396,7 @@ impl State {
 					pc += 2;
 				}
 				pc += 2;*/
-			}, 0xF000 => {
+			}, 0xF => {
 				match l2_const.data as u8 {
 					0x07 => self.data_registers.set_x(current, self.delay_timer),
 					0x0A => {
@@ -429,7 +415,7 @@ impl State {
 						self.data_registers[i] = self.memory[self.adress_register.as_usize() + i];
 					}, _ => panic!("Unknown memory opcode {}.", current.data)
 				}
-			}
+			}, _ => panic!("Unknown opcode {}", current)
 		}
 		false
 	}
@@ -478,6 +464,9 @@ fn byte() {
 
 	assert_eq!(cut.shift_left(4), Byte::from(0b0100_0000));
 	assert_eq!(cut.shift_right(4), Byte::from(0b0000_0001));
+
+	assert_eq!(Byte::from(0b1111_1111).add(0b0000_0010), Byte::from(0b0000_0001));
+	assert_eq!(Byte::from(0b1111_1111).add_byte(Byte::from(0b0000_0010)), Byte::from(0b0000_0001));
 }
 
 #[test]

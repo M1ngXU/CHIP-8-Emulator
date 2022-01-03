@@ -27,7 +27,7 @@ impl Screen {
 	}
 
 	pub fn in_bounds(&self, x: usize, y: usize) -> bool {
-		y < self.height || x < self.width
+		y < self.height && x < self.width
 	}
 
 	pub fn get(&self, x: usize, y: usize) -> bool {
