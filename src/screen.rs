@@ -1,14 +1,13 @@
-use std::io;
 use std::io::{Write, stdout};
-use crossterm::{QueueableCommand, cursor};
-
 use crossterm::{
-	execute,
-	style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
-	ExecutableCommand, Result,
-	event, queue,
-	terminal , style::{self, Stylize}
+	execute, queue,
+	cursor,
+	style::{Color, Print},
+	event,
+	terminal , style::{self, Stylize},
+	event::{poll, read, Event}
 };
+use std::time::Duration;
 
 fn get_sized_vec<T: Copy>(value: T, width: usize, height: usize) -> Vec<Vec<T>> {
 	let mut new = Vec::new();
@@ -27,9 +26,33 @@ impl Screen {
 	pub fn new(width: usize, height: usize) -> Self {
 		//clear screen & hide cursor
 		crossterm::terminal::enable_raw_mode();
-		execute!(&mut stdout(), cursor::Hide, terminal::Clear(terminal::ClearType::All));
+		execute!(
+			&mut stdout(),
+			cursor::Hide,
+			terminal::Clear(terminal::ClearType::All),
+			crossterm::style::SetBackgroundColor(Color::White)
+		);
+		// TODO: Exit command - one thread to get terminal stuff
+		/*thread::spawn(|| 
+			loop {
+				if poll(Duration::from_millis(100)).ok().unwrap() {
+					match read().ok() {
+							Some(Event::Key(event)) => {
+								if let event::KeyCode::Char(c) = event.code {
+									if c.to_ascii_lowercase() == 'q' {
+										execute!(&mut stdout(), cursor::Show);
+										crossterm::terminal::disable_raw_mode();
+									}
+								}
+							},
+							_ => {}
+					}
+				}
+			}
+		);*/
 		Self {
-			pix: get_sized_vec(false, width, height),
+			// one line for blocking key request, other line for BUZZ
+			pix: get_sized_vec(false, width, height + 2),
 			width,
 			height
 		}
@@ -58,45 +81,58 @@ impl Screen {
 	}
 
 	pub fn update(&self) {
-		//reset cursor-pos and draw
 		let mut stdout = stdout();
-		//stdout.execute(cursor::MoveTo(0, 0));
-		self.pix.iter().enumerate()
-			.for_each(| (y, row) |
-				row.iter().enumerate().for_each(| (x, o) |{
-					queue!(
-						stdout,
-						cursor::MoveTo(x as u16, y as u16),
-						style::PrintStyledContent((if *o { "#" } else { " " }).white())
-					);
-				})
-			);
+		self.pix.iter().enumerate().for_each(| (y, row) |
+			row.iter().enumerate().for_each(| (x, o) |{
+				queue!(
+					stdout,
+					cursor::MoveTo(x as u16 + 1, y as u16),
+					style::PrintStyledContent(if *o { "█".black() } else { " ".white() })
+				);
+			})
+		);
 		stdout.flush();
 	}
 
-	pub fn get_input(&self) -> u8 {
+	pub fn get_current_input(&self) -> Option<u8> {
+		if poll(Duration::from_millis(50)).ok().unwrap() {
+			match read().ok() {
+					Some(Event::Key(event)) => {
+						if let event::KeyCode::Char(c) = event.code {
+							if let Ok(v) = u8::from_str_radix(&c.to_string(), 16) {
+								Some(v)
+							} else {
+								None
+							}
+						} else {
+							None
+						}
+					},
+					_ => None
+			}
+		} else {
+			None
+		}
+	}
+
+	pub fn buzz(&self) {
+		execute!(
+			&mut stdout(),
+			cursor::MoveTo(1, self.height as u16 - 2),
+			style::PrintStyledContent("BUZZ".black())
+		);
+	}
+
+	pub fn get_blocking_input(&self) -> u8 {
 		self.update();
-		let mut s;
+		execute!(
+			&mut stdout(),
+			cursor::MoveTo(1, self.height as u16 - 1),
+			style::PrintStyledContent("Press a key ...".black())
+		);
 		loop {
-			s = String::new();
-			execute!(
-				&mut stdout(),
-				cursor::MoveTo(0, self.height as u16),
-				style::PrintStyledContent("Press a hex key ...".red()),
-				cursor::MoveTo(0, self.height as u16 + 1),
-				Print(" ".repeat(self.width)),
-				cursor::MoveTo(0, self.height as u16 + 1),
-			);
-			io::stdin().read_line(&mut s).expect("Failed to read line");
-			if let Ok(v) = u8::from_str_radix(&s[0..1], 16) {
-				execute!(
-					&mut stdout(),
-					cursor::MoveTo(0, self.height as u16),
-					Print(" ".repeat(self.width)),
-					cursor::MoveTo(0, self.height as u16 + 1),
-					Print(" ".repeat(self.width)),
-				);
-				break v;
+			if let Some(e) = self.get_current_input() {
+				break e;
 			}
 		}
 	}

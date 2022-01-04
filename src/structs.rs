@@ -291,7 +291,7 @@ impl State {
 		}
 		if self.sound_timer.data > 0 {
 			self.sound_timer.decrease(1);
-			println!("BUZZ!");
+			self.screen.buzz();
 		}
 	}
 
@@ -397,11 +397,20 @@ impl State {
 						}
 					}
 				}
-			}, 0xE => {
+			}, 0xE => match l2_const.data {
+				0x9E => if let Some(k) = self.screen.get_current_input() {
+					if k == x.data {
+						self.pc.add(2);
+					}
+				}, 0xA1 => if let Some(k) = self.screen.get_current_input() {
+					if k != x.data {
+						self.pc.add(2);
+					}
+				}, _ => unreachable!()
 			}, 0xF => {
 				match l2_const.data as u8 {
 					0x07 => self.data_registers.set_x(current, self.delay_timer),
-					0x0A => self.data_registers.set_x(current, Byte::from(self.screen.get_input())),
+					0x0A => self.data_registers.set_x(current, Byte::from(self.screen.get_blocking_input())),
 					0x15 => self.delay_timer = x,
 					0x18 => self.sound_timer = x,
 					0x1E => self.adress_register.increase_with_byte(x),
