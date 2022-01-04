@@ -2,6 +2,7 @@ use std::collections::{ HashSet, LinkedList };
 use std::fmt::{ Display, Debug };
 use std::fmt;
 use std::ops::{ Index, IndexMut };
+use crate::screen::Screen;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub struct Byte {
@@ -296,7 +297,7 @@ impl State {
 	}
 
 	pub fn shut_down(&self) {
-		self.screen.update();
+		self.screen.exit();
 	}
 
 	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_adress: u16) {
@@ -306,6 +307,9 @@ impl State {
 	}
 
 	pub fn interpret_next(&mut self) -> bool {
+		if self.screen.requested_exit() {
+			return true;
+		}
 		let current = self.memory.get_two_bytes(self.pc);
 		let x = self.data_registers.get_x(current);
 		let y = self.data_registers.get_y(current);
@@ -313,7 +317,7 @@ impl State {
 		let l2_const = current.mask_bits(&TwoBytes::from(0x00FF)).as_byte();
 		let l1_const = current.mask_bits(&TwoBytes::from(0x000F)).as_byte();
 		match current.shift_right(12).as_usize() {
-			0x0 | 0x1 | 0xB => {},
+			0x0 | 0x1 | 0x2 | 0xB => {},
 			_ => self.pc.increase(2)
 		};
 		match current.shift_right(12).as_usize() {
@@ -322,16 +326,14 @@ impl State {
 					self.screen.clear();
 					self.pc.increase(2);
 				}, 0x0EE => self.pc = self.stack.pop_back().unwrap(),
-				_ => {
-					todo!("not necessary?");
-				}
+				_ => panic!("Can't handle rom execution.")
 			}, 0x1 => {
 				if self.pc == l3_const {
 					return true;
 				}
 				self.pc = l3_const;
 			}, 0x2 => {
-				self.stack.push_back(self.pc);
+				self.stack.push_back(self.pc.add(2));
 				self.pc = l3_const;
 			}, 0x3 => if x == l2_const {
 				self.pc.increase(2)
@@ -400,12 +402,14 @@ impl State {
 			}, 0xE => match l2_const.data {
 				0x9E => if let Some(k) = self.screen.get_current_input() {
 					if k == x.data {
-						self.pc.add(2);
+						self.pc.increase(2);
 					}
 				}, 0xA1 => if let Some(k) = self.screen.get_current_input() {
 					if k != x.data {
-						self.pc.add(2);
+						self.pc.increase(2);
 					}
+				} else {
+					self.pc.increase(2);
 				}, _ => unreachable!()
 			}, 0xF => {
 				match l2_const.data as u8 {

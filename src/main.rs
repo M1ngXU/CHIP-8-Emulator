@@ -27,19 +27,22 @@ fn main() {
 	let mut virtual_machine_state = structs::State::new_chip8();
 
 	virtual_machine_state.load_memory(FONT.to_vec(), 0);
-	virtual_machine_state.load_memory(fs::read("./roms/invaders.ch8").expect("Failed to read programm."), 0x200);
+	virtual_machine_state.load_memory(fs::read("./roms/spinvaders.ch8").expect("Failed to read programm."), 0x200);
 	
 	let mut last_frame = SystemTime::now();
 	let mut last_opcode = SystemTime::now();
-	let speed = 5000;
-	let hz = 1000.0 / 10.0;
+	let fps = 15;
+	let opcodes_per_frame = 48;
+	let opcodes_execution_time = (1000.0 / fps as f64 / opcodes_per_frame as f64) as u128;
 
+	let mut i = 0;
 	while !virtual_machine_state.interpret_next() {
-		if last_frame.elapsed().unwrap().as_millis() as f64 > hz {
-			last_frame = SystemTime::now();
+		if i % opcodes_per_frame == 0 {
 			virtual_machine_state.next_frame();
 		}
-		thread::sleep(Duration::from_millis((1000.0 / speed as f64 - last_opcode.elapsed().unwrap().as_millis() as f64) as u64));
+		i += 1;
+		while last_opcode.elapsed().unwrap().as_millis() < opcodes_execution_time {}
+		//thread::sleep(Duration::from_millis(((1000.0 / fps as f64) / opcodes_per_frame as f64 - last_opcode.elapsed().unwrap().as_millis() as f64).max(0.0) as u64));
 		last_opcode = SystemTime::now();
 	}
 	virtual_machine_state.shut_down();
