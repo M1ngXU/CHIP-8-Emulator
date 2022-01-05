@@ -3,6 +3,8 @@ use std::time::{ SystemTime, Duration };
 
 mod structs;
 mod screen;
+mod event_manager;
+mod audio_manager;
 
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -24,25 +26,27 @@ static FONT: [ u8; 80 ] = [
 ];
 
 fn main() {
-	let mut virtual_machine_state = structs::State::new_chip8();
+	let screen = screen::Screen::new(64, 32, 25);
+	let event_manager = screen.get_event_manager_pointer();
+	let mut virtual_machine_state = structs::State::new_chip8(screen);
 
 	virtual_machine_state.load_memory(FONT.to_vec(), 0);
-	virtual_machine_state.load_memory(fs::read("./roms/spinvaders.ch8").expect("Failed to read programm."), 0x200);
-	
-	let mut last_frame = SystemTime::now();
+	virtual_machine_state.load_memory(
+		fs::read(std::env::args().nth(1).unwrap_or("./roms/pong.ch8".to_string())
+	).expect("Failed to read program."), 0x200);
+
 	let mut last_opcode = SystemTime::now();
-	let fps = 15;
-	let opcodes_per_frame = 48;
+	let fps = 60;
+	let opcodes_per_frame = 12;
 	let opcodes_execution_time = (1000.0 / fps as f64 / opcodes_per_frame as f64) as u128;
 
 	let mut i = 0;
-	while !virtual_machine_state.interpret_next() {
+	while !virtual_machine_state.interpret_next() && !event_manager.lock().unwrap().is_terminating() {
 		if i % opcodes_per_frame == 0 {
 			virtual_machine_state.next_frame();
 		}
 		i += 1;
 		while last_opcode.elapsed().unwrap().as_millis() < opcodes_execution_time {}
-		//thread::sleep(Duration::from_millis(((1000.0 / fps as f64) / opcodes_per_frame as f64 - last_opcode.elapsed().unwrap().as_millis() as f64).max(0.0) as u64));
 		last_opcode = SystemTime::now();
 	}
 	virtual_machine_state.shut_down();

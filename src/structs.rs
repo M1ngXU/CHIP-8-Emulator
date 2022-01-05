@@ -257,14 +257,14 @@ pub struct State {
 	random_numbers: LinkedList<Byte>
 }
 impl State {
-	pub fn new_chip8() -> Self {
+	pub fn new_chip8(screen: Screen) -> Self {
 		Self {
 			memory: Memory::new(4096),
 			data_registers: DataRegisters::new(16),
 			adress_register: TwoBytes::new(),
 			stack: LinkedList::new(),
 			pc: TwoBytes::from(0x200),
-			screen: super::screen::Screen::new(64, 32),
+			screen,
 			delay_timer: Byte::new(),
 			sound_timer: Byte::new(),
 			random_numbers: {
@@ -297,7 +297,7 @@ impl State {
 	}
 
 	pub fn shut_down(&self) {
-		self.screen.exit();
+		//self.screen.exit();
 	}
 
 	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_adress: u16) {
@@ -307,9 +307,9 @@ impl State {
 	}
 
 	pub fn interpret_next(&mut self) -> bool {
-		if self.screen.requested_exit() {
+		/*if self.screen.requested_exit() {
 			return true;
-		}
+		}*/
 		let current = self.memory.get_two_bytes(self.pc);
 		let x = self.data_registers.get_x(current);
 		let y = self.data_registers.get_y(current);
@@ -392,23 +392,17 @@ impl State {
 						if self.memory[self.adress_register.add(h)].mask_bits(&Byte::from(1).shift_left(7 - i)).shift_right(7 - i).data == 1 {
 							let screen_x = x.as_usize() + i as usize;
 							let screen_y = y.as_usize() + h as usize;
-							if self.screen.get(screen_x, screen_y) {
+							if self.screen.get(screen_x as u32, screen_y as u32) {
 								self.data_registers.set_f(true);
 							}
-							self.screen.swap(screen_x, screen_y);
+							self.screen.swap(screen_x as u32, screen_y as u32);
 						}
 					}
 				}
 			}, 0xE => match l2_const.data {
-				0x9E => if let Some(k) = self.screen.get_current_input() {
-					if k == x.data {
-						self.pc.increase(2);
-					}
-				}, 0xA1 => if let Some(k) = self.screen.get_current_input() {
-					if k != x.data {
-						self.pc.increase(2);
-					}
-				} else {
+				0x9E => if self.screen.is_pressed(x.data) {
+					self.pc.increase(2);
+				}, 0xA1 => if !self.screen.is_pressed(x.data) {
 					self.pc.increase(2);
 				}, _ => unreachable!()
 			}, 0xF => {

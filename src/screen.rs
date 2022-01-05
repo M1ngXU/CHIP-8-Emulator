@@ -1,158 +1,163 @@
-use std::io::{Write, stdout, Read, Cursor};
-use std::ops::Deref;
-use std::rc::Rc;
-use crossterm::{execute, queue, cursor, style::{Color, Print}, event, Result, terminal, style::{self, Stylize}, event::{poll, read, Event, KeyCode}, ExecutableCommand, QueueableCommand};
-use std::time::Duration;
-use std::sync::{Arc, mpsc, Mutex};
-use std::sync::mpsc::Receiver;
+use std::sync::{Arc, mpsc, Mutex, MutexGuard};
+use std::sync::mpsc::Sender;
 use std::thread;
-use crossterm::style::ResetColor;
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+use sdl2::pixels::Color;
+use sdl2::rect::Point;
+use crate::event_manager::{EventManager, PressedKey};
 
-fn get_sized_vec<T: Copy>(value: T, width: usize, height: usize) -> Vec<Vec<T>> {
+pub struct Screen {
+	pix: Vec<Vec<bool>>,
+	width: u32,
+	height: u32,
+	scale: u32,
+	event_manager: Arc<Mutex<EventManager>>,
+	sender: Sender<ScreenEvent>
+}
+
+enum ScreenEvent {
+	Clear,
+	Update,
+	Set(u32, u32, bool)
+}
+
+fn get_sized_vec<T: Copy>(value: T, width: u32, height: u32) -> Vec<Vec<T>> {
 	let mut new = Vec::new();
 	for _ in 0..height {
-		new.push(Vec::from([ value ].repeat(width)));
+		new.push(Vec::from([ value ].repeat(width as usize)));
 	}
 	new
 }
 
-pub struct Screen {
-	pix: Vec<Vec<bool>>,
-	width: usize,
-	height: usize,
-	keys: Arc<Mutex<Option<char>>>,
-	about_to_exit:Arc<Mutex<bool>>
-}
-
 impl Screen {
-	pub fn new(width: usize, height: usize) -> Self {
-		//clear screen & hide cursor
-		let mut stdout = stdout();
-		queue!(
-			stdout,
-			EnterAlternateScreen,
-			crossterm::style::SetBackgroundColor(Color::Black),
-			cursor::Hide
-		);
-		crossterm::terminal::enable_raw_mode();
-		stdout.flush();
-		let mut m = Arc::new(Mutex::new(None));
-		let mut e = Arc::new(Mutex::new(false));
+	pub fn new(width: u32, height: u32, scale: u32) -> Self {
+		let (sender, receiver) = mpsc::channel();
+		let event_manager = Arc::new(Mutex::new(EventManager::new()));
+		let e = event_manager.clone();
+
+		thread::spawn(move || {
+			let sdl_context = sdl2::init().unwrap();
+			let mut canvas = sdl_context.video().unwrap()
+				.window("CHIP 8", width * scale, height * scale)
+				.position_centered()
+				.build()
+				.unwrap()
+				.into_canvas().build().unwrap();
+
+
+
+			/*let audio_subsystem = sdl_context.audio().unwrap();
+
+			let desired_spec = AudioSpecDesired {
+				freq: Some(44100),
+				channels: Some(1),  // mono
+				samples: None       // default sample size
+			};
+
+			let device = audio_subsystem.open_playback(None, &desired_spec, |spec| {
+				// initialize the audio callback
+				SquareWave {
+					phase_inc: 440.0 / spec.freq as f32,
+					phase: 0.0,
+					volume: 0.25
+				}
+			}).unwrap();
+
+// Start playback
+			device.resume();
+*/
+
+			canvas.set_logical_size(width, height);
+			canvas.set_scale(scale as f32, scale as f32);
+
+			let mut event_pump = sdl_context.event_pump().unwrap();
+			loop {
+				if let Ok(screen_event) = receiver.try_recv() {
+					match screen_event {
+						ScreenEvent::Update => canvas.present(),
+						ScreenEvent::Clear => {
+							canvas.set_draw_color(Color::RGB(0, 0, 0));
+							canvas.clear();
+						}, ScreenEvent::Set(x, y, v) => {
+							if v {
+								canvas.set_draw_color(Color::RGB(255, 255, 255))
+							} else {
+								canvas.set_draw_color(Color::RGB(0, 0, 0));
+							}
+							canvas.draw_point(Point::new(x as i32, y as i32));
+						}
+					}
+				}
+				e.lock().unwrap().update(event_pump.poll_iter());
+			}
+		});
+
 		let mut new = Self {
 			// one line for blocking key request, other line for BUZZ
-			pix: get_sized_vec(false, width, height + 2),
+			pix: get_sized_vec(false, width, height),
 			width,
 			height,
-			keys: Arc::clone(&m),
-			about_to_exit: Arc::clone(&e)
+			scale,
+			event_manager,
+			sender
 		};
 		new.clear();
-		thread::spawn(move||
-			loop {
-				match read().ok() {
-					Some(Event::Key(event)) => {
-						match event.code {
-							KeyCode::Char(c) => {
-								*m.lock().unwrap() = Some(c);
-								thread::sleep(Duration::from_millis(100));
-								*m.lock().unwrap() = None;
-							}, KeyCode::Esc => *e.lock().unwrap() = true,
-							_ => {}
-						}
-					},
-					_ => {}
-				}
-			}
-		);
 		new
 	}
 
-	pub fn requested_exit(&self) -> bool {
-		self.about_to_exit.lock().unwrap().clone()
+	pub fn get_event_manager(&self) -> MutexGuard<EventManager> {
+		self.event_manager.lock().unwrap()
 	}
 
-	pub fn exit(&self) {
-		crossterm::terminal::disable_raw_mode();
-		execute!(
-			&mut stdout(),
-			ResetColor,
-			cursor::Show,
-			cursor::MoveTo(1, self.height as u16 + 3),
-			Print("Press enter to exit ...")
-		);
-		std::io::stdin().read_line(&mut String::new()).unwrap();
-		stdout().execute(terminal::LeaveAlternateScreen);
-		std::process::exit(0);
+	pub fn get_event_manager_pointer(&self) -> Arc<Mutex<EventManager>> {
+		self.event_manager.clone()
 	}
 
 	pub fn clear(&mut self) {
 		self.pix = get_sized_vec(false, self.width, self.height);
-		let mut stdout = stdout();
-		for y in 1..=(self.height + 2) {
-			for x in 1..=self.width {
-				queue!(
-					stdout,
-					cursor::MoveTo(x as u16, y as u16),
-					style::PrintStyledContent(" ".on_black())
-				);
-			}
-		}
-		stdout.flush();
+		self.sender.send(ScreenEvent::Clear);
+		self.sender.send(ScreenEvent::Update);
 	}
 
-	pub fn in_bounds(&self, x: usize, y: usize) -> bool {
+	pub fn in_bounds(&self, x: u32, y: u32) -> bool {
 		y < self.height && x < self.width
 	}
 
-	pub fn get(&self, x: usize, y: usize) -> bool {
-		self.in_bounds(x, y) && self.pix[y][x]
+	pub fn get(&self, x: u32, y: u32) -> bool {
+		self.in_bounds(x, y) && self.pix[y as usize][x as usize]
 	}
 
-	pub fn set(&mut self, x: usize, y: usize, v: bool) {
+	pub fn set(&mut self, x: u32, y: u32, v: bool) {
 		if self.in_bounds(x, y) {
-			self.pix[y][x] = v;
-			queue!(
-				&mut stdout(),
-				cursor::MoveTo(x as u16 + 1, y as u16 + 1),
-				style::PrintStyledContent(if v { " ".on_white() } else { " ".on_black() })
-			);
+			self.pix[y as usize][x as usize] = v;
+			self.sender.send(ScreenEvent::Set(x, y, v));
 		}
 	}
 
-	pub fn swap(&mut self, x: usize, y: usize) {
+	pub fn swap(&mut self, x: u32, y: u32) {
 		self.set(x, y, !self.get(x, y));
 	}
 
-	pub fn update(&self) {
-		stdout().flush();
+	pub fn update(&mut self) {
+		self.sender.send(ScreenEvent::Update);
 	}
 
-	pub fn get_current_input(&self) -> Option<u8> {
-		if let Ok(v) = u8::from_str_radix(&self.keys.lock().unwrap().unwrap_or(' ').to_string(), 16) {
-			return Some(v);
+	pub fn is_pressed(&mut self, key: u8) -> bool {
+		if let Some(k) = PressedKey::from_hex(key) {
+			self.get_event_manager().is_scancode_pressed(k)
+		} else {
+			false
 		}
-		None
 	}
 
 	pub fn buzz(&self) {
-		queue!(
-			&mut stdout(),
-			cursor::MoveTo(1, self.height as u16 - 2),
-			style::PrintStyledContent("BUZZ".white().on_black())
-		);
 	}
 
-	pub fn get_blocking_input(&self) -> u8 {
-		self.update();
-		queue!(
-			&mut stdout(),
-			cursor::MoveTo(1, self.height as u16 - 1),
-			style::PrintStyledContent("Press a key ...".white().on_black())
-		);
+	pub fn get_blocking_input(&mut self) -> u8 {
 		loop {
-			if let Some(e) = self.get_current_input() {
-				break e;
+			if let Some(h) = self.get_event_manager()
+					.get_one_pressed_key()
+					.and_then(| k | k.to_hex()) {
+				break h;
 			}
 		}
 	}
