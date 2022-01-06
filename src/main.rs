@@ -1,10 +1,14 @@
-use std::{ thread, fs };
-use std::time::{ SystemTime, Duration };
+use std::fs;
+use std::time::SystemTime;
+use simple_logger::SimpleLogger;
+use sdl2::keyboard::Scancode;
+use sdl2::mouse::MouseButton;
 
 mod structs;
-mod screen;
+mod output;
 mod event_manager;
-mod audio_manager;
+mod keyboard_state;
+mod mouse_state;
 
 static FONT: [ u8; 80 ] = [
 	0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -25,29 +29,85 @@ static FONT: [ u8; 80 ] = [
 	0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 
+static FPS: f64 = 60.0;
+
 fn main() {
-	let screen = screen::Screen::new(64, 32, 25);
-	let event_manager = screen.get_event_manager_pointer();
-	let mut virtual_machine_state = structs::State::new_chip8(screen);
+	SimpleLogger::new().init().unwrap();
+	let mut virtual_machine_state = structs::State::new_chip8();
+	let event_manager = virtual_machine_state.output.get_event_manager_pointer();
+	let mut keyboard_state = virtual_machine_state.output.get_keyboard_state();
+	let mut mouse_state = virtual_machine_state.output.get_mouse_state();
 
 	virtual_machine_state.load_memory(FONT.to_vec(), 0);
 	virtual_machine_state.load_memory(
-		fs::read(std::env::args().nth(1).unwrap_or("./roms/pong.ch8".to_string())
+		fs::read(std::env::args().nth(1).unwrap_or("./roms/spinvaders.ch8".to_string())
 	).expect("Failed to read program."), 0x200);
 
 	let mut last_opcode = SystemTime::now();
-	let fps = 60;
+	let mut fps = FPS;
+	let log_speed = | f: f64 | log::info!("Current speed: {}%", (f / FPS * 100.0).ceil());
+	let mut pause = false;
 	let opcodes_per_frame = 12;
-	let opcodes_execution_time = (1000.0 / fps as f64 / opcodes_per_frame as f64) as u128;
+	let mut cheating = false;
 
 	let mut i = 0;
-	while !virtual_machine_state.interpret_next() && !event_manager.lock().unwrap().is_terminating() {
+	while !event_manager.lock().unwrap().is_terminating() {
+		mouse_state.update();
+		if cheating {
+			if let Some(&m) = mouse_state.currently_pressed.iter().next() {
+				let (x, y) = mouse_state.coordinates;
+				match m {
+					MouseButton::Left => {
+						virtual_machine_state.output.set(x as u32, y as u32, true);
+						continue;
+					}, MouseButton::Right => {
+						virtual_machine_state.output.set(x as u32, y as u32, false);
+						continue;
+					},
+					_ => {}
+				}
+			}
+		}
+		keyboard_state.update();
+		if keyboard_state.just_pressed.contains(&Scancode::F1.into()) {
+			fps = FPS;
+			log_speed(fps);
+		}
+		if keyboard_state.just_pressed.contains(&Scancode::F2.into()) {
+			fps /= 1.1;
+			log_speed(fps);
+		}
+		if keyboard_state.just_pressed.contains(&Scancode::F3.into()) {
+			fps *= 1.1;
+			log_speed(fps);
+		}
+		if keyboard_state.just_pressed.contains(&Scancode::F4.into()) {
+			cheating = !cheating;
+			if cheating {
+				log::warn!("CHEAT-MODE turned on!!! Drawing onto the screen modifies collisions ...");
+			} else {
+				log::info!("CHEAT-MODE turned off!!!");
+			}
+		}
+		if keyboard_state.just_pressed.contains(&Scancode::Escape.into()) {
+			pause = !pause;
+			if pause {
+				log::info!("Paused emulation ...")
+			} else {
+				log::info!("Unpaused emulation ...")
+			}
+		}
+		if pause || !event_manager.lock().unwrap().is_focused() {
+			continue;
+		}
+
+		virtual_machine_state.interpret_next();
 		if i % opcodes_per_frame == 0 {
 			virtual_machine_state.next_frame();
 		}
 		i += 1;
-		while last_opcode.elapsed().unwrap().as_millis() < opcodes_execution_time {}
+		while last_opcode.elapsed().unwrap().as_millis() < (1000.0 / fps / opcodes_per_frame as f64) as u128 {}
 		last_opcode = SystemTime::now();
 	}
-	virtual_machine_state.shut_down();
+	virtual_machine_state.shutdown();
 }

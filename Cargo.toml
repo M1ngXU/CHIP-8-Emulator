@@ -5,6 +5,9 @@ authors = ["runner"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies.sdl2]
+version = "0.35"
 
 [dependencies]
-sdl2 = "0.35"
+simple_logger = "1.16.0"
+log = "0.4.0"

@@ -2,7 +2,7 @@ use std::collections::{ HashSet, LinkedList };
 use std::fmt::{ Display, Debug };
 use std::fmt;
 use std::ops::{ Index, IndexMut };
-use crate::screen::Screen;
+use crate::output::Output;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub struct Byte {
@@ -251,20 +251,21 @@ pub struct State {
 	adress_register: TwoBytes,
 	stack: LinkedList<TwoBytes>,
 	pc: TwoBytes,
-	screen: super::screen::Screen,
+	pub output: Output,
 	delay_timer: Byte,
 	sound_timer: Byte,
-	random_numbers: LinkedList<Byte>
+	random_numbers: LinkedList<Byte>,
+	awaiting_key: Option<TwoBytes>
 }
 impl State {
-	pub fn new_chip8(screen: Screen) -> Self {
+	pub fn new_chip8() -> Self {
 		Self {
 			memory: Memory::new(4096),
 			data_registers: DataRegisters::new(16),
 			adress_register: TwoBytes::new(),
 			stack: LinkedList::new(),
 			pc: TwoBytes::from(0x200),
-			screen,
+			output: Output::new(64, 32, 25),
 			delay_timer: Byte::new(),
 			sound_timer: Byte::new(),
 			random_numbers: {
@@ -275,7 +276,7 @@ impl State {
 					a.insert(((e.as_nanos() / e.as_millis().max(1)) % 256) as u8);
 				}
 				LinkedList::from_iter(a.drain().map(| n | Byte::from(n)))
-			}
+			}, awaiting_key: None
 		}
 	}
 
@@ -286,30 +287,35 @@ impl State {
 	}
 
 	pub fn next_frame(&mut self) {
-		self.screen.update();
 		if self.delay_timer.data > 0 {
 			self.delay_timer.decrease(1);
 		}
 		if self.sound_timer.data > 0 {
 			self.sound_timer.decrease(1);
-			self.screen.buzz();
+			self.output.buzz();
+			if self.sound_timer.data == 0 {
+				self.output.stop_buzz();
+			}
 		}
 	}
 
-	pub fn shut_down(&self) {
-		//self.screen.exit();
-	}
-
-	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_adress: u16) {
+	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_address: u16) {
 		for (i, b) in bytes.into_iter().enumerate() {
-			self.memory[i + starting_adress as usize] = Byte::from(b);
+			self.memory[i + starting_address as usize] = Byte::from(b);
 		}
 	}
 
-	pub fn interpret_next(&mut self) -> bool {
-		/*if self.screen.requested_exit() {
-			return true;
-		}*/
+	pub fn shutdown(&self) {
+	}
+
+	pub fn interpret_next(&mut self) {
+		if let Some(k) = self.awaiting_key {
+			if let Some(c) = self.output.get_current_input() {
+				self.data_registers.set_x(k, Byte::from(c));
+				self.awaiting_key = None;
+			}
+			return;
+		}
 		let current = self.memory.get_two_bytes(self.pc);
 		let x = self.data_registers.get_x(current);
 		let y = self.data_registers.get_y(current);
@@ -323,14 +329,11 @@ impl State {
 		match current.shift_right(12).as_usize() {
 			0x0 => match l3_const.data {
 				0x0E0 => {
-					self.screen.clear();
+					self.output.clear();
 					self.pc.increase(2);
 				}, 0x0EE => self.pc = self.stack.pop_back().unwrap(),
 				_ => panic!("Can't handle rom execution.")
 			}, 0x1 => {
-				if self.pc == l3_const {
-					return true;
-				}
 				self.pc = l3_const;
 			}, 0x2 => {
 				self.stack.push_back(self.pc.add(2));
@@ -392,25 +395,32 @@ impl State {
 						if self.memory[self.adress_register.add(h)].mask_bits(&Byte::from(1).shift_left(7 - i)).shift_right(7 - i).data == 1 {
 							let screen_x = x.as_usize() + i as usize;
 							let screen_y = y.as_usize() + h as usize;
-							if self.screen.get(screen_x as u32, screen_y as u32) {
+							if self.output.get(screen_x as u32, screen_y as u32) {
 								self.data_registers.set_f(true);
 							}
-							self.screen.swap(screen_x as u32, screen_y as u32);
+							self.output.swap(screen_x as u32, screen_y as u32);
 						}
 					}
 				}
 			}, 0xE => match l2_const.data {
-				0x9E => if self.screen.is_pressed(x.data) {
+				0x9E => if self.output.is_pressed(x.data) {
 					self.pc.increase(2);
-				}, 0xA1 => if !self.screen.is_pressed(x.data) {
+				}, 0xA1 => if !self.output.is_pressed(x.data) {
 					self.pc.increase(2);
 				}, _ => unreachable!()
 			}, 0xF => {
 				match l2_const.data as u8 {
 					0x07 => self.data_registers.set_x(current, self.delay_timer),
-					0x0A => self.data_registers.set_x(current, Byte::from(self.screen.get_blocking_input())),
-					0x15 => self.delay_timer = x,
-					0x18 => self.sound_timer = x,
+					0x0A => {
+						log::info!("Awaiting a key (hex) input ...");
+						self.awaiting_key = Some(current);
+					}, 0x15 => self.delay_timer = x,
+					0x18 => {
+						if x.data == 0 {
+							self.output.stop_buzz();
+						}
+						self.sound_timer = x;
+					},
 					0x1E => self.adress_register.increase_with_byte(x),
 					0x29 => self.adress_register = TwoBytes::from(x.data as u16 * 5),
 					0x33 => {
@@ -425,7 +435,6 @@ impl State {
 				}
 			}, _ => panic!("Unknown opcode {}", current)
 		}
-		false
 	}
 }
 
