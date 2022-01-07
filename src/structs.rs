@@ -2,6 +2,8 @@ use std::collections::{ HashSet, LinkedList };
 use std::fmt::{ Display, Debug };
 use std::fmt;
 use std::ops::{ Index, IndexMut };
+use std::sync::{Arc, Mutex};
+use crate::logger::LogInfo;
 use crate::output::Output;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -48,7 +50,7 @@ impl Byte {
 	pub fn shift_left(&self, amount: u8) -> Self {
 		let mut mask = 0xFF;
 		for b in 0..amount {
-			mask = mask & !(1 << (7 - b));
+			mask &= !(1 << (7 - b));
 		}
 		Self::from((self.data & mask) << amount)
 	}
@@ -56,7 +58,7 @@ impl Byte {
 	pub fn shift_right(&self, amount: u8) -> Self {
 		let mut mask = 0xFF;
 		for b in 0..amount {
-			mask = mask & !(1 << b);
+			mask &= !(1 << b);
 		}
 		Self::from((self.data & mask) >> amount)
 	}
@@ -244,28 +246,42 @@ impl IndexMut<usize> for DataRegisters {
 	}
 }
 
+pub trait Interpreter {
+	fn new(output: Arc<Mutex<Output>>) -> Self;
+	fn next_frame(&mut self);
+	fn shutdown(&mut self);
+	fn load_memory(&mut self, bytes: Vec<u8>, starting_address: u16);
+	fn interpret_next(&mut self);
+}
 
-pub struct State {
+pub struct Chip8Interpreter {
 	memory: Memory,
 	data_registers: DataRegisters,
-	adress_register: TwoBytes,
+	address_register: TwoBytes,
 	stack: LinkedList<TwoBytes>,
 	pc: TwoBytes,
-	pub output: Output,
+	output: Arc<Mutex<Output>>,
 	delay_timer: Byte,
 	sound_timer: Byte,
 	random_numbers: LinkedList<Byte>,
 	awaiting_key: Option<TwoBytes>
 }
-impl State {
-	pub fn new_chip8() -> Self {
+impl Chip8Interpreter {
+	fn get_next_random(&mut self) -> Byte {
+		let r = self.random_numbers.pop_front().unwrap();
+		self.random_numbers.push_back(r);
+		r
+	}
+}
+impl Interpreter for Chip8Interpreter {
+	fn new(output: Arc<Mutex<Output>>) -> Self {
 		Self {
 			memory: Memory::new(4096),
 			data_registers: DataRegisters::new(16),
-			adress_register: TwoBytes::new(),
+			address_register: TwoBytes::new(),
 			stack: LinkedList::new(),
 			pc: TwoBytes::from(0x200),
-			output: Output::new(64, 32, 25),
+			output,
 			delay_timer: Byte::new(),
 			sound_timer: Byte::new(),
 			random_numbers: {
@@ -275,42 +291,37 @@ impl State {
 					let e = start.elapsed().unwrap();
 					a.insert(((e.as_nanos() / e.as_millis().max(1)) % 256) as u8);
 				}
-				LinkedList::from_iter(a.drain().map(| n | Byte::from(n)))
+				LinkedList::from_iter(a.drain().map(Byte::from))
 			}, awaiting_key: None
 		}
 	}
 
-	pub fn get_next_random(&mut self) -> Byte {
-		let r = self.random_numbers.pop_front().unwrap();
-		self.random_numbers.push_back(r);
-		r
-	}
-
-	pub fn next_frame(&mut self) {
+	fn next_frame(&mut self) {
 		if self.delay_timer.data > 0 {
 			self.delay_timer.decrease(1);
 		}
 		if self.sound_timer.data > 0 {
+			let output = self.output.lock().unwrap();
 			self.sound_timer.decrease(1);
-			self.output.buzz();
+			output.buzz();
 			if self.sound_timer.data == 0 {
-				self.output.stop_buzz();
+				output.stop_buzz();
 			}
 		}
 	}
 
-	pub fn load_memory(&mut self, bytes: Vec<u8>, starting_address: u16) {
+	fn shutdown(&mut self) {
+	}
+
+	fn load_memory(&mut self, bytes: Vec<u8>, starting_address: u16) {
 		for (i, b) in bytes.into_iter().enumerate() {
 			self.memory[i + starting_address as usize] = Byte::from(b);
 		}
 	}
 
-	pub fn shutdown(&self) {
-	}
-
-	pub fn interpret_next(&mut self) {
+	fn interpret_next(&mut self) {
 		if let Some(k) = self.awaiting_key {
-			if let Some(c) = self.output.get_current_input() {
+			if let Some(c) = self.output.lock().unwrap().get_current_input() {
 				self.data_registers.set_x(k, Byte::from(c));
 				self.awaiting_key = None;
 			}
@@ -329,7 +340,7 @@ impl State {
 		match current.shift_right(12).as_usize() {
 			0x0 => match l3_const.data {
 				0x0E0 => {
-					self.output.clear();
+					self.output.lock().unwrap().clear();
 					self.pc.increase(2);
 				}, 0x0EE => self.pc = self.stack.pop_back().unwrap(),
 				_ => panic!("Can't handle rom execution.")
@@ -383,54 +394,55 @@ impl State {
 				_ => panic!("Unknown Variable Operation {}.", current)
 			}, 0x9 => if x.data != y.data {
 				self.pc.increase(2);
-			}, 0xA => self.adress_register = l3_const,
+			}, 0xA => self.address_register = l3_const,
 			0xB => self.pc = l3_const.add_byte(self.data_registers.get_0()),
 			0xC => {
 				let masked_random_number = self.get_next_random().mask_bits(&l2_const);
 				self.data_registers.set_x(current, masked_random_number)
 			}, 0xD => {
 				self.data_registers.set_f(false);
+				let mut output = self.output.lock().unwrap();
 				for h in 0..current.mask_bits(&TwoBytes::from(0x000F)).data {
 					for i in 0..8 {
-						if self.memory[self.adress_register.add(h)].mask_bits(&Byte::from(1).shift_left(7 - i)).shift_right(7 - i).data == 1 {
+						if self.memory[self.address_register.add(h)].mask_bits(&Byte::from(1).shift_left(7 - i)).shift_right(7 - i).data == 1 {
 							let screen_x = x.as_usize() + i as usize;
 							let screen_y = y.as_usize() + h as usize;
-							if self.output.get(screen_x as u32, screen_y as u32) {
+							if output.get(screen_x as u32, screen_y as u32) {
 								self.data_registers.set_f(true);
 							}
-							self.output.swap(screen_x as u32, screen_y as u32);
+							output.swap(screen_x as u32, screen_y as u32);
 						}
 					}
 				}
 			}, 0xE => match l2_const.data {
-				0x9E => if self.output.is_pressed(x.data) {
+				0x9E => if self.output.lock().unwrap().is_pressed(x.data) {
 					self.pc.increase(2);
-				}, 0xA1 => if !self.output.is_pressed(x.data) {
+				}, 0xA1 => if !self.output.lock().unwrap().is_pressed(x.data) {
 					self.pc.increase(2);
 				}, _ => unreachable!()
 			}, 0xF => {
 				match l2_const.data as u8 {
 					0x07 => self.data_registers.set_x(current, self.delay_timer),
 					0x0A => {
-						log::info!("Awaiting a key (hex) input ...");
+						"Awaiting a key (hex) input ...".log();
 						self.awaiting_key = Some(current);
 					}, 0x15 => self.delay_timer = x,
 					0x18 => {
 						if x.data == 0 {
-							self.output.stop_buzz();
+							self.output.lock().unwrap().stop_buzz();
 						}
 						self.sound_timer = x;
 					},
-					0x1E => self.adress_register.increase_with_byte(x),
-					0x29 => self.adress_register = TwoBytes::from(x.data as u16 * 5),
+					0x1E => self.address_register.increase_with_byte(x),
+					0x29 => self.address_register = TwoBytes::from(x.data as u16 * 5),
 					0x33 => {
-						self.memory[self.adress_register.as_usize()] = Byte::from_usize(x.as_usize() / 100);
-						self.memory[self.adress_register.as_usize() + 1] = Byte::from_usize(x.as_usize() % 100 / 10);
-						self.memory[self.adress_register.as_usize() + 2] = Byte::from_usize(x.as_usize() % 10);
+						self.memory[self.address_register.as_usize()] = Byte::from_usize(x.as_usize() / 100);
+						self.memory[self.address_register.as_usize() + 1] = Byte::from_usize(x.as_usize() % 100 / 10);
+						self.memory[self.address_register.as_usize() + 2] = Byte::from_usize(x.as_usize() % 10);
 					}, 0x55 => for i in 0..=l3_const.shift_right(8).as_usize() {
-						self.memory[self.adress_register.add(i as u16)] = self.data_registers[i];
+						self.memory[self.address_register.add(i as u16)] = self.data_registers[i];
 					}, 0x65 => for i in 0..=l3_const.shift_right(8).as_usize() {
-						self.data_registers[i] = self.memory[self.adress_register.add(i as u16)];
+						self.data_registers[i] = self.memory[self.address_register.add(i as u16)];
 					}, _ => panic!("Unknown memory opcode {}.", current.data)
 				}
 			}, _ => panic!("Unknown opcode {}", current)
@@ -440,7 +452,7 @@ impl State {
 
 #[test]
 fn save_load_registers() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	cut.load_memory(vec![
 		0x60, 0x10,
 		0xA0, 0x00,
@@ -459,7 +471,7 @@ fn save_load_registers() {
 
 #[test]
 fn goto() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	cut.load_memory(vec![ 0x10, 0x11 ], 0x200);
 	assert_eq!(cut.pc.data, 0x200);
 	assert!(!cut.interpret_next());
@@ -468,7 +480,7 @@ fn goto() {
 
 #[test]
 fn subroutine() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	// call subroutine, then return
 	cut.load_memory(vec![ 0x22, 0x04, 0x00, 0x00, 0x00, 0xEE ], 0x200);
 	assert_eq!(cut.pc.data, 0x200);
@@ -480,7 +492,7 @@ fn subroutine() {
 
 #[test]
 fn compare_data_registers() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	// set vx, vy, then compare
 	cut.load_memory(vec![ 0x60, 0x01, 0x61, 0x01, 0x30, 0x01, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x50, 0x10, 0x00, 0x00, 0x90, 0x10 ], 0x200);
 	assert_eq!(cut.data_registers[0].data, 0x00);
@@ -501,7 +513,7 @@ fn compare_data_registers() {
 
 #[test]
 fn data_register_operations() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	// set vx, vy, then operate
 	cut.load_memory(vec![
 		0x60, 0x05, // 0 = 5
@@ -572,7 +584,7 @@ fn data_register_operations() {
 
 #[test]
 fn set_adress_register() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	cut.load_memory(vec![ 0xA1, 0x23 ], 0x200);
 	assert!(!cut.interpret_next());
 	assert_eq!(cut.adress_register.data, 0x123);
@@ -580,7 +592,7 @@ fn set_adress_register() {
 
 #[test]
 fn jump_to() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	cut.load_memory(vec![
 		0x12, 0x04,
 		0x00, 0x00,
@@ -596,7 +608,7 @@ fn jump_to() {
 
 #[test]
 fn random_numbers() {
-	let mut cut = State::new_chip8();
+	let mut cut = Chip8Interpreter::new_chip8();
 	cut.random_numbers = LinkedList::new();
 	cut.random_numbers.push_back(Byte::from(0b0011_0000));
 	cut.load_memory(vec![
@@ -608,7 +620,7 @@ fn random_numbers() {
 
 #[test]
 fn new_state() {
-	let cut = State::new_chip8();
+	let cut = Chip8Interpreter::new_chip8();
 	assert_eq!(cut.memory[TwoBytes::from(4095)], Byte::new());
 	assert_eq!(cut.data_registers[Byte::new()], Byte::new());
 	assert_eq!(cut.adress_register, TwoBytes::new());
