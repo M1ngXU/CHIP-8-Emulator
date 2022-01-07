@@ -7,6 +7,7 @@ mod event_manager;
 mod app_state;
 mod emulator;
 mod logger;
+mod fixed_bit_numbers;
 
 static FPS: f32 = 60.0;
 

@@ -449,7 +449,7 @@ impl Interpreter for Chip8Interpreter {
 		}
 	}
 }
-
+/*
 #[test]
 fn save_load_registers() {
 	let mut cut = Chip8Interpreter::new_chip8();
@@ -682,4 +682,4 @@ fn two_bytes() {
 
 	assert_eq!(cut.shift_left(4), TwoBytes::from(0b1110_0000_0000_0000));
 	assert_eq!(cut.shift_right(4), TwoBytes::from(0b0000_0000_1110_0000));
-}
+}*/
