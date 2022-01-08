@@ -2,23 +2,15 @@ use std::sync::{Arc, mpsc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
-use sdl2::audio::{AudioCallback, AudioSpecDesired};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::video::{FullscreenType, WindowPos};
 use crate::event_manager::EventManager;
 use crate::app_state::{AppState, PressedKey};
+use crate::audio_manager::AudioManager;
 use crate::logger::LogError;
 
-pub struct Output {
-	pix: Vec<Vec<bool>>,
-	width: u32,
-	height: u32,
-	event_manager: Arc<Mutex<EventManager>>,
-	sender: Sender<ScreenEvent>,
-	size_changed: Arc<AtomicBool>
-}
 
 pub enum ScreenEvent {
 	Clear,
@@ -38,25 +30,13 @@ fn get_sized_vec<T: Copy>(value: T, width: u32, height: u32) -> Vec<Vec<T>> {
 	new
 }
 
-struct SquareWave {
-	phase_inc: f32,
-	phase: f32,
-	volume: f32
-}
-impl AudioCallback for SquareWave {
-	type Channel = f32;
-
-	fn callback(&mut self, out: &mut [f32]) {
-		// Generate a square wave
-		for x in out.iter_mut() {
-			*x = if self.phase <= 0.5 {
-				self.volume
-			} else {
-				-self.volume
-			};
-			self.phase = (self.phase + self.phase_inc) % 1.0;
-		}
-	}
+pub struct Output {
+	pix: Vec<Vec<bool>>,
+	width: u32,
+	height: u32,
+	event_manager: Arc<Mutex<EventManager>>,
+	sender: Sender<ScreenEvent>,
+	size_changed: Arc<AtomicBool>
 }
 
 impl Output {
@@ -86,20 +66,7 @@ impl Output {
 
 			let mut canvas = window.into_canvas().build().unwrap();
 
-			let device = sdl_context.audio().unwrap()
-				.open_playback(
-					None,
-					&AudioSpecDesired {
-						freq: Some(44100),
-						channels: Some(1),
-						samples: None
-					},
-					| spec | SquareWave {
-						phase_inc: 440.0 / spec.freq as f32,
-						phase: 0.0,
-						volume: 0.25
-					}
-				).unwrap();
+			let device = AudioManager::get_prepared_buzz_device(&sdl_context);
 
 
 			let mut scale_x = scale;
@@ -196,7 +163,7 @@ impl Output {
 	}
 
 	pub fn update_screen(&self) {
-		self.send(ScreenEvent::Update, "sending screen update");
+		self.send(ScreenEvent::Update, "screen update");
 	}
 
 	pub fn toggle_fullscreen(&self) {
@@ -246,8 +213,11 @@ impl Output {
 		}
 	}
 
-	pub fn swap(&mut self, x: u32, y: u32) {
-		self.set(x, y, !self.get(x, y));
+	/// returns true if a pix switched from `on` -> `off`
+	pub fn swap(&mut self, x: u32, y: u32) -> bool {
+		let old_val = self.get(x, y);
+		self.set(x, y, !old_val);
+		old_val
 	}
 
 	pub fn is_pressed(&self, key: u8) -> bool {

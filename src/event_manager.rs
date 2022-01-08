@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::mouse::MouseButton;
 use crate::app_state::PressedKey;
+use crate::fixed_bit_numbers::IntoEmpty;
 use crate::logger::LogInfo;
 
 pub struct EventManager {
@@ -34,26 +35,19 @@ impl EventManager {
             }, _ => {
                 if self.is_focused() {
                     match event {
-                        Event::KeyDown { scancode: Some(s), .. } => {
-                            self.keys_pressed.lock().unwrap().insert(s.into());
-                        }, Event::KeyUp { scancode: Some(s), .. } => {
-                            self.keys_pressed.lock().unwrap().remove(&s.into());
-                        }, Event::Window { win_event: WindowEvent::FocusLost, .. } => {
+                        Event::KeyDown { scancode: Some(s), .. } => self.keys_pressed.lock().unwrap().insert(s.into()).into_empty(),
+                        Event::KeyUp { scancode: Some(s), .. } => self.keys_pressed.lock().unwrap().remove(&s.into()).into_empty(),
+                        Event::Window { win_event: WindowEvent::FocusLost, .. } => {
                             self.keys_pressed.lock().unwrap().clear();
                             self.mouse_buttons_pressed.lock().unwrap().clear();
                             self.focused.store(false, Ordering::Relaxed);
-                            "Lost focus.".log()
-                        }, Event::MouseButtonDown { mouse_btn, .. } => {
-                            self.mouse_buttons_pressed.lock().unwrap().insert(mouse_btn);
-                        }, Event::MouseButtonUp { mouse_btn, .. } => {
-                            self.mouse_buttons_pressed.lock().unwrap().remove(&mouse_btn);
-                        }, Event::MouseMotion { x, y, .. } => {
-                            *self.mouse_coordinates.lock().unwrap() = (x / scale.0 as i32, y / scale.1 as i32);
-                        }, _ => {}
+                        }, Event::MouseButtonDown { mouse_btn, .. } => self.mouse_buttons_pressed.lock().unwrap().insert(mouse_btn).into_empty(),
+                        Event::MouseButtonUp { mouse_btn, .. } => self.mouse_buttons_pressed.lock().unwrap().remove(&mouse_btn).into_empty(),
+                        Event::MouseMotion { x, y, .. } => *self.mouse_coordinates.lock().unwrap() = (x / scale.0 as i32, y / scale.1 as i32),
+                        _ => {}
                     }
                 } else if let Event::Window { win_event: WindowEvent::FocusGained, .. } = event {
                     self.focused.store(true, Ordering::Relaxed);
-                    "Regained focus.".log();
                 }
             }
         }

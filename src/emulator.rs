@@ -5,9 +5,9 @@ use std::time::SystemTime;
 use sdl2::keyboard::Scancode;
 use sdl2::mouse::MouseButton;
 use crate::app_state::InputState;
+use crate::interpreter::*;
 use crate::logger::{LogInfo, LogWarning};
 use crate::output::Output;
-use crate::structs::{Chip8Interpreter, Interpreter};
 
 static FONT: [ u8; 80 ] = [
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -56,6 +56,7 @@ impl Emulator<Chip8Interpreter> {
             let mut pause_before_focus_loss = false;
             let mut cheat_mode = false;
             let mut last_frame = SystemTime::now();
+            let millis_between_frames = (1000.0 / fps) as u128;
 
             loop {
                 app_state.update();
@@ -64,7 +65,7 @@ impl Emulator<Chip8Interpreter> {
                 }
                 let mut output = output.lock().unwrap();
                 let keyboard_state = app_state.get_keyboard_state();
-                if last_frame.elapsed().unwrap().as_millis() > fps as u128 {
+                if last_frame.elapsed().unwrap().as_millis() > millis_between_frames {
                     output.update_screen();
                     last_frame = SystemTime::now();
                 }
@@ -134,9 +135,12 @@ impl Emulator<Chip8Interpreter> {
                 if app_state.just_lost_focus() {
                     pause_before_focus_loss = p.load(Ordering::Relaxed);
                     p.store(true, Ordering::Relaxed);
+                    output.stop_buzz();
+                    "Lost focus.".log();
                 }
                 if app_state.just_gained_focus() {
                     p.store(pause_before_focus_loss, Ordering::Relaxed);
+                    "Regained focus.".log();
                 }
                 if output.size_changed() || app_state.just_gained_focus() {
                     output.redraw_screen();
@@ -161,7 +165,7 @@ impl Emulator<Chip8Interpreter> {
     pub fn run(&mut self) {
         loop {
             if self.is_paused() {
-                return;
+                continue;
             }
 
             let wait_time = 1_000_000.0 / self.fps / self.opcodes_per_frame as f32 / self.speed.load(Ordering::Relaxed) as f32 * 1000.0;

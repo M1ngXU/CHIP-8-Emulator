@@ -1,13 +1,16 @@
+#![feature(structural_match)]
+
 use std::fs;
 use crate::emulator::Emulator;
 
-mod structs;
 mod output;
 mod event_manager;
 mod app_state;
 mod emulator;
 mod logger;
+mod interpreter;
 mod fixed_bit_numbers;
+mod audio_manager;
 
 static FPS: f32 = 60.0;
 
