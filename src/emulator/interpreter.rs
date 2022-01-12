@@ -1,18 +1,36 @@
 use std::collections::{HashSet, LinkedList};
-use std::sync::{Arc, Mutex};
-use crate::fixed_bit_numbers::{FixedBitNumber, IntoEmpty};
-use crate::logger::LogInfo;
-use crate::output::Output;
+
+use sdl2::keyboard::Scancode;
+use sdl2::pixels::Color;
+
+use crate::emulator::fixed_bit_numbers::{FixedBitNumber, IntoEmpty};
+use crate::LogInfo;
+use crate::sdl2_interaction::event_manager::Event;
+use crate::sdl2_interaction::output::Output;
+use crate::sdl2_interaction::pressed_key::{HexToScancode, ScancodeToHex};
 
 type Byte = FixedBitNumber<8>;
 type Address = FixedBitNumber<16>;
 
+#[derive(Clone, Debug)]
+pub enum InterpreterEvent {
+    SetPixel(usize, usize, Color),
+    RedrawAll,
+    Any
+}
+impl Event for InterpreterEvent {
+    fn is_any(&self) -> bool {
+        matches!(&self, &InterpreterEvent::Any)
+    }
+}
+
 pub trait Interpreter {
-    fn new(output: Arc<Mutex<Output>>) -> Self;
+    fn new(output: Output) -> Self;
     fn next_frame(&mut self);
     fn shutdown(&mut self);
     fn load_memory(&mut self, bytes: Vec<u8>, starting_address: u16);
-    fn interpret_next(&mut self);
+    fn interpret_next(&mut self, pressed_keys: &HashSet<Scancode>);
+    fn get_output(&mut self) -> &mut Output;
 }
 
 pub struct Chip8Interpreter {
@@ -21,7 +39,7 @@ pub struct Chip8Interpreter {
     address_register: Address,
     stack: LinkedList<Address>,
     pc: Address,
-    output: Arc<Mutex<Output>>,
+    output: Output,
     delay_timer: Byte,
     sound_timer: Byte,
     random_numbers: LinkedList<Byte>,
@@ -36,7 +54,7 @@ impl Chip8Interpreter {
     }
 }
 impl Interpreter for Chip8Interpreter {
-    fn new(output: Arc<Mutex<Output>>) -> Self {
+    fn new(output: Output) -> Self {
         Self {
             memory: [ Byte::new(); 4096 ].to_vec(),
             data_registers: [ Byte::new(); 16 ].to_vec(),
@@ -64,12 +82,11 @@ impl Interpreter for Chip8Interpreter {
             self.delay_timer.decrease_by_u32(1);
         }
         if self.sound_timer.into_u32() > 0 {
-            let output = self.output.lock().unwrap();
             self.sound_timer.decrease_by_u32(1);
             if self.sound_timer.into_u32() == 0 {
-                output.stop_buzz();
+                self.output.stop_buzz();
             } else {
-                output.buzz();
+                self.output.buzz();
             }
         }
     }
@@ -82,18 +99,18 @@ impl Interpreter for Chip8Interpreter {
         }
     }
 
-    fn interpret_next(&mut self) {
+    fn interpret_next(&mut self, pressed_keys: &HashSet<Scancode>) {
         if self.finished {
             return;
         }
         if let Some(x) = self.awaiting_key {
-            if let Some(c) = self.output.lock().unwrap().get_current_input() {
+            if let Some(c) = pressed_keys.iter().filter_map(| k | k.try_into_hex()).next() {
                 self.data_registers[x].set_by_u32(c.into());
                 self.awaiting_key = None;
             }
             return;
         }
-        let current = Address::from_combined(&self.memory[&self.pc], &self.memory[&self.pc.add_by_u32(1)]);
+        let current = Address::from_combined(&self.memory[&self.pc], &self.memory[&self.pc + 1]);
         let x = &current.get_bitrange(8, 4);
         let vx = self.data_registers[x];
         let vy = self.data_registers[&current.get_bitrange(4, 4)];
@@ -107,7 +124,7 @@ impl Interpreter for Chip8Interpreter {
         match current.get_bitrange(12, 4).into_u32() {
             0x0 => match l3_const.into_u32() {
                 0x0E0 => {
-                    self.output.lock().unwrap().clear();
+                    self.output.clear();
                     self.pc.increase_by_u32(2);
                 }, 0x0EE => self.pc = self.stack.pop_back().unwrap(),
                 _ => panic!("No rom interaction possible (opcode: {}, pc: {})", current, self.pc)
@@ -120,7 +137,7 @@ impl Interpreter for Chip8Interpreter {
                 }
             },
             0x2 => {
-                self.stack.push_back(self.pc.add_by_u32(2));
+                self.stack.push_back(&self.pc + 2);
                 self.pc = l3_const;
             }, 0x3 => vx.execute_if_equals(&l2_const, || self.pc.increase_by_u32(2).into_empty()),
             0x4 => vx.execute_if_not_equals(&l2_const, || self.pc.increase_by_u32(2).into_empty()),
@@ -150,7 +167,7 @@ impl Interpreter for Chip8Interpreter {
                 }, _ => panic!("Unknown variable opcode {}.", current)
             }, 0x9 => vx.execute_if_not_equals(&vy, || self.pc.increase_by_u32(2).into_empty()),
             0xA => self.address_register.set(&l3_const),
-            0xB => self.pc.set(&l3_const.add(&self.data_registers[0])),
+            0xB => self.pc.set_take_ownership(&l3_const + &self.data_registers[0]),
             0xC => {
                 let nr = &self.get_next_random();
                 self.data_registers[x].set(nr);
@@ -159,18 +176,28 @@ impl Interpreter for Chip8Interpreter {
                 self.data_registers[0xF].set_bool(false);
                 for row in 0..l1_const.into_u32() {
                     for bit in 0..8 {
-                        if self.memory[&self.address_register.add_by_u32(row)].get_bit(7 - bit) {
-                            let collision = self.output.lock().unwrap().swap(vx.add_by_u8(bit).into_u32(), vy.add_by_u32(row).into_u32());
+                        if self.memory[&self.address_register + row].get_bit(7 - bit) {
+                            let collision = self.output.swap((&vx + bit as u32).into_usize(), (&vy + row).into_usize());
                             self.data_registers[0xF].set_bool(collision);
                         }
                     }
                 }
             }, 0xE => {
                 match l2_const.into_u32() {
-                    0x9E => if self.output.lock().unwrap().is_pressed(vx.into_u8()) {
-                        self.pc.increase_by_u32(2);
-                    }, 0xA1 => if !self.output.lock().unwrap().is_pressed(vx.into_u8()) {
-                        self.pc.increase_by_u32(2);
+                    0x9E => {
+                        if let Some(k) = vx.into_u8().try_into_scancode() {
+                            if pressed_keys.contains(&k) {
+                                self.pc.increase_by_u32(2);
+                            }
+                        }
+                    }, 0xA1 => {
+                        if let Some(k) = vx.into_u8().try_into_scancode() {
+                            if !pressed_keys.contains(&k) {
+                                self.pc.increase_by_u32(2);
+                            }
+                        } else {
+                            self.pc.increase_by_u32(2);
+                        }
                     }, _ => panic!("Unknown opcode {}.", current)
                 }
             }, 0xF => {
@@ -183,7 +210,7 @@ impl Interpreter for Chip8Interpreter {
                     }, 0x15 => self.delay_timer.set(&self.data_registers[x]),
                     0x18 => {
                         if vx.into_u32() == 0 {
-                            self.output.lock().unwrap().stop_buzz();
+                            self.output.stop_buzz();
                         }
                         self.sound_timer.set(&self.data_registers[x]);
                     },
@@ -191,15 +218,19 @@ impl Interpreter for Chip8Interpreter {
                     0x29 => self.address_register.set_by_u32(self.data_registers[x].into_u32() * 5),
                     0x33 => {
                         self.memory[&self.address_register].set_by_u32(vx.into_u32() / 100);
-                        self.memory[&self.address_register.add_by_u32(1)].set_by_u32(vx.into_u32() % 100 / 10);
-                        self.memory[&self.address_register.add_by_u32(2)].set_by_u32(vx.into_u32() % 10);
-                    }, 0x55 => for i in 0..=second_hex.into_usize() {
-                        self.memory[&self.address_register.add_by_usize(i)].set(&self.data_registers[i]);
-                    }, 0x65 => for i in 0..=second_hex.into_usize() {
-                        self.data_registers[i].set(&self.memory[&self.address_register.add_by_usize(i)]);
+                        self.memory[&self.address_register + 1].set_by_u32(vx.into_u32() % 100 / 10);
+                        self.memory[&self.address_register + 2].set_by_u32(vx.into_u32() % 10);
+                    }, 0x55 => for i in 0..=second_hex.into_u32() {
+                        self.memory[&self.address_register + i].set(&self.data_registers[i as usize]);
+                    }, 0x65 => for i in 0..=second_hex.into_u32() {
+                        self.data_registers[i as usize].set(&self.memory[&self.address_register + i]);
                     }, _ => panic!("Unknown memory opcode {}.", current)
                 }
             }, _ => panic!("Unknown opcode {} at {}.", current, self.pc)
         }
+    }
+
+    fn get_output(&mut self) -> &mut Output {
+        &mut self.output
     }
 }
