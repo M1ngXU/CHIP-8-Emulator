@@ -1,7 +1,7 @@
 use sdl2::keyboard::Scancode;
 
 static KEYBOARD_LAYOUT: [ Scancode; 16 ] = [
-    Scancode::Kp1, Scancode::Kp2, Scancode::Kp3, Scancode::Kp4,
+    Scancode::Num1, Scancode::Num2, Scancode::Num3, Scancode::Num4,
     Scancode::Q, Scancode::W, Scancode::E, Scancode::R,
     Scancode::A, Scancode::S, Scancode::D, Scancode::F,
     Scancode::Z, Scancode::X, Scancode::C, Scancode::V

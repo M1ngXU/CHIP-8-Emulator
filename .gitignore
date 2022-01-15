@@ -3,4 +3,6 @@ replit.nix
 Cargo.lock
 target/
 .idea/
+saves/
 SDL2.dll
+roms/

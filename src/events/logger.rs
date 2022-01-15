@@ -1,5 +1,4 @@
-use crate::{LogInfo, LogWarning};
-use crate::emulator::SPEED_CHANGE;
+use crate::{LogInfo, LogWarning, SPEED_CHANGE_PER_KEYPRESS};
 use crate::events::EventManager;
 use crate::sdl2_interaction::event_manager::IncomingEvent;
 
@@ -23,7 +22,7 @@ impl EventManager for Logger {
                 } else {
                     "Cheat mode turned off.".wlog();
                 }
-            }, IncomingEvent::SetSpeed(s) => format!("Changed speed to {}%.", (SPEED_CHANGE.powi(*s as i32) * 100.0) as i32).as_str().log(),
+            }, IncomingEvent::SetSpeed(s) => format!("Changed speed to {}%.", (SPEED_CHANGE_PER_KEYPRESS.powi(*s as i32) * 100.0) as i32).as_str().log(),
             _ => {}
         }
        None

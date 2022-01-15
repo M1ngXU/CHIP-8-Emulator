@@ -1,22 +1,26 @@
+use std::collections::HashMap;
 use std::thread;
 
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
+use sdl2::render::BlendMode;
 use sdl2::video::{FullscreenType, WindowPos};
 
 use crate::events::app::AppEvent;
-use crate::LogError;
+use crate::{LogError, PAUSE_TRANSPARENT_COLOR};
 use crate::sdl2_interaction::audio_manager::{AudioEvent, AudioManager};
 use crate::sdl2_interaction::event_manager::{AppEventManager, AppEventReceiver, AppEventSender, Event, IncomingEvent};
 use crate::sdl2_interaction::screen::{Chip8BoolToColor, Chip8ColorToBool, Screen};
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ScreenEvent {
 	Clear,
 	Update,
 	ToggleFullscreen,
-	RedrawAll(Vec<Vec<Color>>),
+	RedrawAll(HashMap<usize, HashMap<usize, Color>>),
 	DrawPixel(usize, usize, Color),
+	ScrollDown(isize),
+	ScrollSide(isize),
 	Any
 }
 impl Event for ScreenEvent {
@@ -49,30 +53,58 @@ impl Output {
 				.resizable()
 				.build()
 				.unwrap();
-			window.set_maximum_size(width * 200, height * 200)
-				.elog("setting maximum (resizable) size");
 			window.set_minimum_size(width, height)
 				.elog("setting minimum (resizable) size");
 			let mut size_before_fullscreen = window.size();
 			let mut position_before_fullscreen = window.position();
 
 			let mut canvas = window.into_canvas().build().unwrap();
+			canvas.set_blend_mode(BlendMode::Blend);
 
 			let mut audio_device = AudioManager::new(&sdl_context, audio_callback_receiver);
 
 			let mut scale_x = scale;
 			let mut scale_y = scale;
 
+			let mut current_viewport = Rect::new(0, 0, width, height);
+
+			let mut pause_overlay = false;
+
 			let mut event_pump = sdl_context.event_pump().unwrap();
 			loop {
 				audio_device.update();
 				while let Ok(app_event) = callback_receiver.try_recv() {
 					match app_event {
-						IncomingEvent::Screen(s) => {
+						IncomingEvent::Pause(true) if !pause_overlay => {
+							pause_overlay = true;
+							canvas.set_draw_color(PAUSE_TRANSPARENT_COLOR);
+							canvas.fill_rect(Rect::new(
+								current_viewport.x() * scale_x as i32,
+								current_viewport.y() * scale_y as i32,
+								current_viewport.width() * scale_x,
+								current_viewport.height() * scale_y,
+							)).elog("making transparent pause overlay");
+						}, IncomingEvent::Screen(s) => {
 							match s {
-								ScreenEvent::DrawPixel(x, y, c) => {
+								ScreenEvent::ScrollDown(s) => {
+									current_viewport.y += s as i32;
+									canvas.set_viewport(Rect::new(
+										current_viewport.x() * scale_x as i32,
+										current_viewport.y() * scale_y as i32,
+										current_viewport.width() * scale_x,
+										current_viewport.height() * scale_y,
+									))
+								},
+								ScreenEvent::ScrollSide(s) => {
+									current_viewport.x += s as i32;
+									canvas.set_viewport(Rect::new(
+										current_viewport.x() * scale_x as i32,
+										current_viewport.y() * scale_y as i32,
+										current_viewport.width() * scale_x,
+										current_viewport.height() * scale_y,
+									))
+								}, ScreenEvent::DrawPixel(x, y, c) => {
 									canvas.set_draw_color(c);
-									//i.app_state.lock().unwrap().get_screen().set(x, y, c);
 									canvas.fill_rect(Rect::new(
 										x as i32 * scale_x as i32,
 										y as i32 * scale_y as i32,
@@ -80,21 +112,21 @@ impl Output {
 										scale_y
 									)).elog("drawing pixel");
 								}, ScreenEvent::RedrawAll(pix) => {
+									pause_overlay = false;
 									canvas.set_draw_color(Color::BLACK);
 									canvas.clear();
 									canvas.set_draw_color(Color::WHITE);
-									canvas.fill_rects(&pix.iter().enumerate()
+									canvas.fill_rects(&pix.iter()
 										.flat_map(|(y, r)|
-											r.iter().enumerate()
+											r.iter()
 												.filter(|(_, p)| **p == Color::WHITE)
 												.map(move |(x, _)| Rect::new(
-													(x as u32 * scale_x) as i32,
-													(y as u32 * scale_y) as i32,
+													(*x as u32 * scale_x) as i32,
+													(*y as u32 * scale_y) as i32,
 													scale_x,
 													scale_y
 												))
 										).collect::<Vec<Rect>>()[..]).elog("redrawing all");
-									canvas.present();
 								}, ScreenEvent::Update => canvas.present(),
 								ScreenEvent::Clear => {
 									canvas.set_draw_color(Color::BLACK);
@@ -140,13 +172,23 @@ impl Output {
 
 		Self {
 			app_event_sender,
-			screen: Screen::new(width as usize, height as usize)
+			screen: Screen::new()
 		}
 	}
 
 	pub fn clear(&mut self) {
 		self.screen.clear();
 		self.send_to_app_state(ScreenEvent::Clear);
+	}
+
+	pub fn scroll_side(&mut self, amount: isize) {
+		self.send_to_app_state(ScreenEvent::ScrollSide(amount));
+		self.screen.set_scroll_side((self.screen.get_scroll_side() as isize + amount) as usize);
+	}
+
+	pub fn scroll_down(&mut self, amount: isize) {
+		self.send_to_app_state(ScreenEvent::ScrollDown(amount));
+		self.screen.set_scroll_down((self.screen.get_scroll_down() as isize + amount) as usize);
 	}
 
 	pub fn send_to_app_state(&self, s: ScreenEvent) {
@@ -158,20 +200,26 @@ impl Output {
 	}
 
 	pub fn set(&mut self, x: usize, y: usize, v: bool) {
-		if !self.screen.set(x, y, v.into_color()) {
-			return;
+		for (x, y) in self.screen.get_pix(x, y) {
+			if self.screen.set(x, y, v.into_color()) {
+				self.send_to_app_state(ScreenEvent::DrawPixel(x, y, v.into_color()));
+			}
 		}
-		self.send_to_app_state(ScreenEvent::DrawPixel(x, y, v.into_color()));
+	}
+
+	pub fn get_screen(&self) -> &Screen {
+		&self.screen
+	}
+
+	pub fn get_screen_mut(&mut self) -> &mut Screen {
+		&mut self.screen
 	}
 
 	/// returns true if a pix switched from `on` -> `off`
 	pub fn swap(&mut self, x: usize, y: usize) -> bool {
-		if let Some(old_val) = self.screen.get(x, y).map(| c | c.into_bool()) {
-			self.set(x, y, !old_val);
-			old_val
-		} else {
-			false
-		}
+		let old_val = self.screen.get(x, y).into_bool();
+		self.set(x, y, !old_val);
+		old_val
 	}
 
 	pub fn buzz(&self) {

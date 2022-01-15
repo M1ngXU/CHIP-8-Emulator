@@ -1,8 +1,8 @@
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::Sdl;
 
-use crate::emulator::SPEED_CHANGE;
 use crate::sdl2_interaction::event_manager::{AppEventReceiver, Event, IncomingEvent};
+use crate::{SPEED_CHANGE_PER_KEYPRESS, STANDARD_BUZZ_FREQUENCY};
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum AudioEvent {
@@ -75,7 +75,7 @@ impl<'a> AudioManager<'a> {
                     samples: None
                 },
                 | spec | SquareWave {
-                    phase_inc: SPEED_CHANGE.powi(speed as i32) * 440.0 / spec.freq as f32,
+                    phase_inc: SPEED_CHANGE_PER_KEYPRESS.powi(speed as i32) * STANDARD_BUZZ_FREQUENCY / spec.freq as f32,
                     phase: 0.0,
                     volume: 0.25
                 }

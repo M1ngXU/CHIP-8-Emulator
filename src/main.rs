@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::fs;
+use sdl2::pixels::Color;
 
 use crate::emulator::Emulator;
 
@@ -36,15 +37,24 @@ impl LogInfo for &str {
 	}
 }
 
+static SPEED_CHANGE_PER_KEYPRESS: f32 = 1.2;
 static FPS: f32 = 60.0;
+static PAUSE_TRANSPARENT_COLOR: Color = Color::RGBA(0xFF, 0xFF, 0xFF, 0x99);
+static OPCODES_PER_FRAME: u32 = 12;
+static SCREEN_WIDTH: u32 = 128;
+static SCREEN_HEIGHT: u32 = 64;
+static STARTING_SCALE: u32 = 10;
+static STANDARD_BUZZ_FREQUENCY: f32 = 440.0;
 
 fn main() {
-	Emulator::new_chip8(
-		FPS,
-		12,
-		fs::read(
-			std::env::args()
-				.nth(1).unwrap_or_else(|| "./roms/spinvaders.ch8".to_string())
-			).unwrap()
-	).run();
+	println!("---(SUPER) CHIP8 EMULATOR BY M1ngXU---");
+	if let Some(path) = std::env::args().nth(1) {
+		match fs::read(&path) {
+			Ok(bin) => Emulator::new_chip8(FPS, OPCODES_PER_FRAME, bin).run(),
+			Err(e) => eprintln!("Failed to read file \"{}\" - error: \"{}\".", path, e)
+		}
+	} else {
+		eprintln!("No file specified as first parameter!");
+	}
+	println!("EMULATION TERMINATED");
 }

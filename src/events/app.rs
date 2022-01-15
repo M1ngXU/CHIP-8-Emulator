@@ -23,18 +23,13 @@ impl EventManager for AppEventManager {
     fn update(&mut self, event: &IncomingEvent) -> Option<IncomingEvent> {
         Some(match event {
             IncomingEvent::App(AppEvent::WindowSizeChange(_, _)) => IncomingEvent::Interpreter(InterpreterEvent::RedrawAll),
-            IncomingEvent::App(AppEvent::SetFocus(f)) => {
-                if *f {
-                    IncomingEvent::Interpreter(InterpreterEvent::RedrawAll)
-                } else {
-                    IncomingEvent::Pause(true)
-                }
-            },
+            IncomingEvent::App(AppEvent::SetFocus(false)) => IncomingEvent::Pause(true),
+            IncomingEvent::Pause(false) => IncomingEvent::Interpreter(InterpreterEvent::RedrawAll),
             _ => return None
         })
     }
 
     fn get_callbacks(&self) -> &[IncomingEvent] {
-        &[ IncomingEvent::App(AppEvent::Any) ]
+        &[ IncomingEvent::App(AppEvent::Any), IncomingEvent::Pause(false) ]
     }
 }

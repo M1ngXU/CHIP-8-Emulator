@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::SystemTime;
+use std::fs::{ read, write };
 
 use fixed_bit_numbers::IntoEmpty;
 
@@ -8,7 +9,7 @@ use crate::emulator::interpreter::{Chip8Interpreter, Interpreter, InterpreterEve
 use crate::events::app::AppEvent;
 use crate::events::EventRedirectManager;
 use crate::events::input::InputEvent;
-use crate::LogError;
+use crate::{LogError, LogWarning, SCREEN_HEIGHT, SCREEN_WIDTH, SPEED_CHANGE_PER_KEYPRESS, STARTING_SCALE};
 use crate::sdl2_interaction::audio_manager::AudioEvent;
 use crate::sdl2_interaction::event_manager::{AppEventReceiver, AppEventSender, IncomingEvent};
 use crate::sdl2_interaction::output::{Output, ScreenEvent};
@@ -35,8 +36,25 @@ static FONT: [ u8; 80 ] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
-/// with what should the speed be multiplied when increasing it?
-pub static SPEED_CHANGE: f32 = 1.2;
+
+static DOUBLE_SIZE_FONT: [ u8; 160 ] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x60, 0x20, 0x20, 0x70, // 1
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+];
 
 pub struct Emulator<T: Interpreter> {
     fps: f32,
@@ -60,7 +78,8 @@ impl Emulator<Chip8Interpreter> {
             ].to_vec()),
             (output_sender, [
                 IncomingEvent::Screen(ScreenEvent::Any),
-                IncomingEvent::App(AppEvent::Any)
+                IncomingEvent::App(AppEvent::Any),
+                IncomingEvent::Pause(true)
             ].to_vec()),
             (interpreter_sender, [
                 IncomingEvent::Pause(false),
@@ -73,14 +92,15 @@ impl Emulator<Chip8Interpreter> {
         let app_state_event_sender = event_manager.get_event_sender();
 
         let mut interpreter = Chip8Interpreter::new(Output::new(
-            64,
-            32,
-            10,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+            STARTING_SCALE,
             output_receiver,
             audio_receiver,
             app_state_event_sender.clone()
         ));
         interpreter.load_memory(FONT.to_vec(), 0);
+        interpreter.load_memory(DOUBLE_SIZE_FONT.to_vec(), 80);
         interpreter.load_memory(opcodes, 0x200);
         Self {
             interpreter,
@@ -93,12 +113,29 @@ impl Emulator<Chip8Interpreter> {
         }
     }
 
+    pub fn save(&self, path: &str) {
+        write(path, self.interpreter.save()).elog(format!("saving to {}", path).as_str());
+    }
+
+    pub fn load(&mut self, path: &str) {
+        if path.is_empty() {
+            "Couldn't find any quicksaves.".wlog();
+            return;
+        }
+        self.interpreter.load(read(path).unwrap());
+        self.interpreter.get_output().redraw_all();
+        self.app_state_event_sender.send(IncomingEvent::Pause(true)).elog("sending pause after load");
+    }
+
     pub fn run(&mut self) {
         let mut pressed_keys = HashSet::new();
         let mut pause = false;
         let mut speed = 1.0;
         let mut last_frame = SystemTime::now();
         let millis_between_frames = (1_000_000.0 / self.fps) as u128;
+        if std::fs::read_dir("./saves").is_err() {
+            std::fs::create_dir("./saves").elog("creating save directory");
+        }
         'main: loop {
             if last_frame.elapsed().unwrap().as_micros() > millis_between_frames {
                 self.app_state_event_sender.send(IncomingEvent::Screen(ScreenEvent::Update)).elog("updating");
@@ -115,11 +152,24 @@ impl Emulator<Chip8Interpreter> {
                             _ => {}
                         }
                     }, IncomingEvent::RequestTermination => break 'main,
-                    IncomingEvent::SetSpeed(s) => speed = SPEED_CHANGE.powi(s as i32),
+                    IncomingEvent::SetSpeed(s) => speed = SPEED_CHANGE_PER_KEYPRESS.powi(s as i32),
                     IncomingEvent::Interpreter(i_e) => {
                         match i_e {
-                            InterpreterEvent::SetPixel(x, y, c) => self.interpreter.get_output().set(x, y, c.into_bool()),
-                            InterpreterEvent::RedrawAll => self.interpreter.get_output().redraw_all(),
+                            InterpreterEvent::SetPixel(x, y, c) => self.interpreter.get_output_mut().set(x, y, c.into_bool()),
+                            InterpreterEvent::RedrawAll => self.interpreter.get_output_mut().redraw_all(),
+                            InterpreterEvent::QuickSave => self.save(format!("./saves/quicksave-{}.ch8", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()).as_str()),
+                            InterpreterEvent::QuickLoad => self.load(format!("./saves/{}", std::fs::read_dir("./saves/")
+                                .unwrap()
+                                .filter_map(| f | f.ok())
+                                .filter_map(| f | f.file_name().into_string().ok())
+                                .reduce(| a, b | {
+                                    if a.starts_with("quicksave-") && b.starts_with("quicksave-") && a.cmp(&b).is_lt() {
+                                        b
+                                    } else {
+                                        a
+                                    }
+                                }).unwrap()).as_str()
+                            ),
                             _ => {}
                         }
                     }, _ => {}

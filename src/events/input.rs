@@ -49,7 +49,7 @@ impl EventManager for InputEventManager {
             IncomingEvent::Input(InputEvent::UpdateMouseCoordinates(x, y)) => self.mouse_coordinates = (*x as usize, *y as usize),
             _ => {
                 return Some(match event {
-                    IncomingEvent::Input(InputEvent::MouseButtonPress(m)) => {
+                    IncomingEvent::Input(InputEvent::MouseButtonPress(m)) if self.is_in_cheat_mode => {
                         IncomingEvent::Interpreter(InterpreterEvent::SetPixel(self.mouse_coordinates.0, self.mouse_coordinates.1, match m {
                             MouseButton::Left => true,
                             MouseButton::Right => false,
@@ -72,6 +72,8 @@ impl EventManager for InputEventManager {
                                 return None;
                             }
                         }, Scancode::F4 => IncomingEvent::SetCheatMode(!self.is_in_cheat_mode),
+                        Scancode::F5 => IncomingEvent::Interpreter(InterpreterEvent::QuickSave),
+                        Scancode::F8 => IncomingEvent::Interpreter(InterpreterEvent::QuickLoad),
                         Scancode::F11 => IncomingEvent::Screen(ScreenEvent::ToggleFullscreen),
                         Scancode::Escape => IncomingEvent::Pause(!self.pause_state),
                         _ => return None

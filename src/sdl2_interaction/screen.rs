@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use sdl2::pixels::Color;
 
 pub trait Chip8BoolToColor {
@@ -22,46 +23,89 @@ impl Chip8ColorToBool for Color {
 }
 
 pub struct Screen {
-    pixels: Vec<Vec<Color>>,
-    width: usize,
-    height: usize
+    pixels: HashMap<usize, HashMap<usize, Color>>,
+    default_color: Color,
+    scale: usize,
+    scroll_down: usize,
+    scroll_side: usize
 }
 impl Screen {
-    pub fn new(width: usize, height: usize) -> Self {
-        let mut new = Self {
-            pixels: Vec::new(),
-            width,
-            height
-        };
-        new.clear();
-        new
+    pub fn new() -> Self {
+        Self {
+            pixels: HashMap::new(),
+            default_color: false.into_color(),
+            scale: 2,
+            scroll_down: 0,
+            scroll_side: 0
+        }
     }
 
-    pub fn get_pixels(&self) -> Vec<Vec<Color>> {
+    pub fn get_pixels(&self) -> HashMap<usize, HashMap<usize, Color>> {
         self.pixels.clone()
     }
 
     pub fn clear(&mut self) {
-        self.pixels = Vec::new(); 
-        for _ in 0..self.height {
-            self.pixels.push([ Color::BLACK ].repeat(self.width as usize).to_vec());
-        }
+        self.pixels = HashMap::new();
     }
     
-    pub fn get(&self, x: usize, y: usize) -> Option<Color> {
-        self.in_bounds(x, y).then(|| self.pixels[y][x])
+    pub fn get(&self, x: usize, y: usize) -> Color {
+        if let Some(row) = self.pixels.get(&(y * self.scale)) {
+            if let Some(pix) = row.get(&(x * self.scale)) {
+                return *pix;
+            }
+        }
+        self.default_color
+    }
+
+    pub fn set_scroll_side(&mut self, s: usize) {
+        self.scroll_side = s;
+    }
+
+    pub fn get_scroll_side(&self) -> usize {
+        self.scroll_side
+    }
+
+    pub fn set_scroll_down(&mut self, s: usize) {
+        self.scroll_down = s;
+    }
+
+    pub fn get_scroll_down(&self) -> usize {
+        self.scroll_down
+    }
+
+    pub fn get_scale(&self) -> usize {
+        self.scale
+    }
+
+    pub fn set_scale(&mut self, s: usize) {
+        self.scale = s;
+    }
+
+    pub fn get_pix(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
+        if self.scale == 2 {
+            vec![
+                (self.scale * x, self.scale * y),
+                (self.scale * x + 1, self.scale * y),
+                (self.scale * x, self.scale * y + 1),
+                (self.scale * x + 1, self.scale * y + 1)
+            ]
+        } else {
+            vec![(x, y)]
+        }
     }
 
     pub fn set(&mut self, x: usize, y: usize, c: Color) -> bool {
-        if self.get(x, y).is_some() {
-            self.pixels[y][x] = c;
-            true
-        } else {
-            false
+        if self.pixels.get(&y).is_none() {
+            self.pixels.insert(y, HashMap::new());
         }
-    }
-
-    pub fn in_bounds(&self, x: usize, y: usize) -> bool {
-        x < self.width && y < self.height
+        if self.pixels.get(&y).unwrap().get(&x).is_none() {
+            self.pixels.get_mut(&y).unwrap().insert(x, self.default_color);
+        }
+        if self.pixels.get(&y).unwrap().get(&x).unwrap() == &c {
+            false
+        } else {
+            *self.pixels.get_mut(&y).unwrap().get_mut(&x).unwrap() = c;
+            true
+        }
     }
 }
