@@ -132,8 +132,7 @@ impl Output {
 									canvas.set_draw_color(Color::BLACK);
 									canvas.clear();
 									canvas.present();
-								},
-								ScreenEvent::ToggleFullscreen => {
+								}, ScreenEvent::ToggleFullscreen => {
 									if canvas.window().fullscreen_state() == FullscreenType::Desktop {
 										canvas.window_mut()
 											.set_fullscreen(FullscreenType::Off)

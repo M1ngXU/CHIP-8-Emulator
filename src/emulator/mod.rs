@@ -155,8 +155,10 @@ impl Emulator<Chip8Interpreter> {
                     IncomingEvent::SetSpeed(s) => speed = SPEED_CHANGE_PER_KEYPRESS.powi(s as i32),
                     IncomingEvent::Interpreter(i_e) => {
                         match i_e {
-                            InterpreterEvent::SetPixel(x, y, c) => self.interpreter.get_output_mut().set(x, y, c.into_bool()),
-                            InterpreterEvent::RedrawAll => self.interpreter.get_output_mut().redraw_all(),
+                            InterpreterEvent::SetPixel(x, y, c) => {
+                                let scale = self.interpreter.get_output().get_screen().get_scale();
+                                self.interpreter.get_output_mut().set(x / scale, y / scale, c.into_bool());
+                            }, InterpreterEvent::RedrawAll => self.interpreter.get_output_mut().redraw_all(),
                             InterpreterEvent::QuickSave => self.save(format!("./saves/quicksave-{}.ch8", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()).as_str()),
                             InterpreterEvent::QuickLoad => self.load(format!("./saves/{}", std::fs::read_dir("./saves/")
                                 .unwrap()

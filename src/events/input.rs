@@ -46,6 +46,7 @@ impl EventManager for InputEventManager {
         match event {
             IncomingEvent::SetSpeed(s) => self.speed = *s,
             IncomingEvent::Pause(p) => self.pause_state = *p,
+            IncomingEvent::SetCheatMode(c) => self.is_in_cheat_mode = *c,
             IncomingEvent::Input(InputEvent::UpdateMouseCoordinates(x, y)) => self.mouse_coordinates = (*x as usize, *y as usize),
             _ => {
                 return Some(match event {
@@ -88,7 +89,8 @@ impl EventManager for InputEventManager {
         &[
             IncomingEvent::Pause(false),
             IncomingEvent::Input(InputEvent::Any),
-            IncomingEvent::SetSpeed(0)
+            IncomingEvent::SetSpeed(0),
+            IncomingEvent::SetCheatMode(true)
         ]
     }
 }
