@@ -1,8 +1,8 @@
-.replit
-replit.nix
-Cargo.lock
 target/
-.idea/
 saves/
-SDL2.dll
 roms/
+.vscode/
+
+Cargo.lock
+
+SDL2.dll

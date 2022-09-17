@@ -4,5 +4,13 @@ version = "1.0.0"
 authors = ["M1ngXU"]
 edition = "2021"
 
+[dependencies]
+serialport = "4.2.0"
+
+[dependencies.rfd]
+version = "0.10.0"
+default-features = false
+features = ["xdg-portal"]
+
 [dependencies.sdl2]
 version = "0.35"

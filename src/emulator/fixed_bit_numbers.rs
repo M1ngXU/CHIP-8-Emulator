@@ -5,7 +5,7 @@ use std::ops::{Add, Index, IndexMut};
 /// max is the biggest possible number, always being full of `1`s
 #[derive(Debug, Clone, Copy)]
 pub struct FixedBitNumber<const A: u8> {
-    number: u32
+    number: u32,
 }
 impl<const A: u8> FixedBitNumber<A> {
     pub fn new() -> Self {
@@ -15,7 +15,7 @@ impl<const A: u8> FixedBitNumber<A> {
     /// creates a new `FixedBitNumber` by a u32, 'overflowing' if the number exceeds the max-size
     pub fn from(number: u32) -> Self {
         Self {
-            number: number & Self::get_max()
+            number: number & Self::get_max(),
         }
     }
 
@@ -27,8 +27,13 @@ impl<const A: u8> FixedBitNumber<A> {
         A
     }
 
-    pub fn from_combined<const B: u8, const C: u8>(n1: &FixedBitNumber<B>, n2: &FixedBitNumber<C>) -> Self {
-        Self::from(((n1.number & Self::get_max_by_length(A - C)) << C) + (n2.number & Self::get_max()))
+    pub fn from_combined<const B: u8, const C: u8>(
+        n1: &FixedBitNumber<B>,
+        n2: &FixedBitNumber<C>,
+    ) -> Self {
+        Self::from(
+            ((n1.number & Self::get_max_by_length(A - C)) << C) + (n2.number & Self::get_max()),
+        )
     }
 
     pub fn get_max() -> u32 {
@@ -184,7 +189,7 @@ impl<const A: u8, const B: u8> IndexMut<FixedBitNumber<A>> for Vec<FixedBitNumbe
 }
 
 impl<const A: u8> Display for FixedBitNumber<A> {
-    fn fmt(&self, f: &mut Formatter<>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(f, "0x{:x}", self.number)
     }
 }
@@ -216,10 +221,13 @@ impl<const A: u8, const B: u8> Add<&FixedBitNumber<B>> for &FixedBitNumber<A> {
 }
 
 pub trait IntoEmpty {
-    fn into_empty(self) where Self: Sized {}
+    fn into_empty(self)
+    where
+        Self: Sized,
+    {
+    }
 }
 impl<T> IntoEmpty for T {}
-
 
 #[cfg(test)]
 mod tests {

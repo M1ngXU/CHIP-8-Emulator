@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use sdl2::pixels::Color;
+use std::collections::HashMap;
 
 pub trait Chip8BoolToColor {
     fn into_color(self) -> Color;
@@ -27,7 +27,7 @@ pub struct Screen {
     default_color: Color,
     scale: usize,
     scroll_down: usize,
-    scroll_side: usize
+    scroll_side: usize,
 }
 impl Screen {
     pub fn new() -> Self {
@@ -36,7 +36,7 @@ impl Screen {
             default_color: false.into_color(),
             scale: 2,
             scroll_down: 0,
-            scroll_side: 0
+            scroll_side: 0,
         }
     }
 
@@ -47,7 +47,7 @@ impl Screen {
     pub fn clear(&mut self) {
         self.pixels = HashMap::new();
     }
-    
+
     pub fn get(&self, x: usize, y: usize) -> Color {
         if let Some(row) = self.pixels.get(&(y * self.scale)) {
             if let Some(pix) = row.get(&(x * self.scale)) {
@@ -87,7 +87,7 @@ impl Screen {
                 (self.scale * x, self.scale * y),
                 (self.scale * x + 1, self.scale * y),
                 (self.scale * x, self.scale * y + 1),
-                (self.scale * x + 1, self.scale * y + 1)
+                (self.scale * x + 1, self.scale * y + 1),
             ]
         } else {
             vec![(x, y)]
@@ -99,7 +99,10 @@ impl Screen {
             self.pixels.insert(y, HashMap::new());
         }
         if self.pixels.get(&y).unwrap().get(&x).is_none() {
-            self.pixels.get_mut(&y).unwrap().insert(x, self.default_color);
+            self.pixels
+                .get_mut(&y)
+                .unwrap()
+                .insert(x, self.default_color);
         }
         if self.pixels.get(&y).unwrap().get(&x).unwrap() == &c {
             false

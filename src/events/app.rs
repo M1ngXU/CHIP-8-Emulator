@@ -6,7 +6,7 @@ use crate::sdl2_interaction::event_manager::{Event, IncomingEvent};
 pub enum AppEvent {
     WindowSizeChange(i32, i32),
     SetFocus(bool),
-    Any
+    Any,
 }
 impl Event for AppEvent {
     fn is_any(&self) -> bool {
@@ -22,14 +22,19 @@ impl EventManager for AppEventManager {
 
     fn update(&mut self, event: &IncomingEvent) -> Option<IncomingEvent> {
         Some(match event {
-            IncomingEvent::App(AppEvent::WindowSizeChange(_, _)) => IncomingEvent::Interpreter(InterpreterEvent::RedrawAll),
+            IncomingEvent::App(AppEvent::WindowSizeChange(_, _)) => {
+                IncomingEvent::Interpreter(InterpreterEvent::RedrawAll)
+            }
             IncomingEvent::App(AppEvent::SetFocus(false)) => IncomingEvent::Pause(true),
             IncomingEvent::Pause(false) => IncomingEvent::Interpreter(InterpreterEvent::RedrawAll),
-            _ => return None
+            _ => return None,
         })
     }
 
     fn get_callbacks(&self) -> &[IncomingEvent] {
-        &[ IncomingEvent::App(AppEvent::Any), IncomingEvent::Pause(false) ]
+        &[
+            IncomingEvent::App(AppEvent::Any),
+            IncomingEvent::Pause(false),
+        ]
     }
 }

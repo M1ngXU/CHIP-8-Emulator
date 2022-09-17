@@ -7,7 +7,7 @@ use crate::{SPEED_CHANGE_PER_KEYPRESS, STANDARD_BUZZ_FREQUENCY};
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum AudioEvent {
     Buzz(bool),
-    Any
+    Any,
 }
 impl Event for AudioEvent {
     fn is_any(&self) -> bool {
@@ -18,7 +18,7 @@ impl Event for AudioEvent {
 pub struct SquareWave {
     phase_inc: f32,
     phase: f32,
-    volume: f32
+    volume: f32,
 }
 impl AudioCallback for SquareWave {
     type Channel = f32;
@@ -39,7 +39,7 @@ impl AudioCallback for SquareWave {
 pub struct AudioManager<'a> {
     sdl_context: &'a Sdl,
     current_device: AudioDevice<SquareWave>,
-    callback_receiver: AppEventReceiver
+    callback_receiver: AppEventReceiver,
 }
 
 impl<'a> AudioManager<'a> {
@@ -47,38 +47,47 @@ impl<'a> AudioManager<'a> {
         Self {
             sdl_context,
             current_device: Self::get_buzz_device(sdl_context, 0),
-            callback_receiver
+            callback_receiver,
         }
     }
 
     pub fn update(&mut self) {
         while let Ok(event) = self.callback_receiver.try_recv() {
             match event {
-                IncomingEvent::SetSpeed(s) => self.current_device = Self::get_buzz_device(self.sdl_context, s),
-                IncomingEvent::Audio(AudioEvent::Buzz(b)) => if b {
-                    self.current_device.resume()
-                } else {
-                    self.current_device.pause()
-                },
+                IncomingEvent::SetSpeed(s) => {
+                    self.current_device = Self::get_buzz_device(self.sdl_context, s)
+                }
+                IncomingEvent::Audio(AudioEvent::Buzz(b)) => {
+                    if b {
+                        self.current_device.resume()
+                    } else {
+                        self.current_device.pause()
+                    }
+                }
                 _ => {}
             }
         }
     }
 
     fn get_buzz_device(sdl_context: &Sdl, speed: i8) -> AudioDevice<SquareWave> {
-        sdl_context.audio().unwrap()
+        sdl_context
+            .audio()
+            .unwrap()
             .open_playback(
                 None,
                 &AudioSpecDesired {
                     freq: Some(44100),
                     channels: Some(1),
-                    samples: None
+                    samples: None,
                 },
-                | spec | SquareWave {
-                    phase_inc: SPEED_CHANGE_PER_KEYPRESS.powi(speed as i32) * STANDARD_BUZZ_FREQUENCY / spec.freq as f32,
+                |spec| SquareWave {
+                    phase_inc: SPEED_CHANGE_PER_KEYPRESS.powi(speed as i32)
+                        * STANDARD_BUZZ_FREQUENCY
+                        / spec.freq as f32,
                     phase: 0.0,
-                    volume: 0.25
-                }
-            ).unwrap()
+                    volume: 0.25,
+                },
+            )
+            .unwrap()
     }
 }
