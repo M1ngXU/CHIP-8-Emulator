@@ -2,15 +2,17 @@
 This emulator supports [CHIP-8](https://en.wikipedia.org/wiki/CHIP-8) and [SUPERCHIP](https://groups.google.com/g/comp.sys.handhelds/c/sDY9zFb6KUo/m/JcYBK2_yerMJ) games with the option to use an Arduino Keypad as an input.
 
 # Installation
-Since Sdl2 is used, you'll need the [Sdl2 runtime library](https://www.libsdl.org/download-2.0.php) for you system next to your executable file.
-You can find the executable file either in the [releases](https://github.com/M1ngXU/CHIP-8-Emulator/releases/) or you have to build it with `cargo build --release`.
+Since Sdl2 is used, you'll need the [Sdl2 runtime library](https://www.libsdl.org/download-2.0.php) next to your executable file.
+
+You can find the executable file either in the [releases](https://github.com/M1ngXU/CHIP-8-Emulator/releases/) or can build it with `cargo`. Make sure to install the [dependencies](https://docs.rs/rfd/latest/rfd/#linux--bsd-backends:~:text=It%20does%20not%20have%20any%20non%2DRust%20build%20dependencies%2C%20however%20it%20requires%20the%20user%20to%20have%20either%20the%20GTK%2C%20GNOME%2C%20or%20KDE%20XDG%20Desktop%20Portal%20backend%20installed%20at%20runtime.) for if using Linux.
 
 # Binaries
 You can find many binaries [here](https://github.com/badlogic/chip8/blob/master/roms/).
 
 # Emulate a game
-In a terminal, run `chip8-emulator.exe path/to/binary`.
-As of version 2.0 you can just run `chip8-emulator.exe` and a popup to pick a file will appear.
+In a terminal, run `chip8-emulator path/to/binary`.
+
+As of version 2.0 you can just run `chip8-emulator` and a popup to pick a file will appear.
 
 Before the first run starts, it might take some time for the antivirus-software to check everything. Before the first run, a `saves` folder is created for quicksaves.
 
